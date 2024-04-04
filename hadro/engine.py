@@ -24,57 +24,14 @@ logger = logging.get_logger()
 logger.setLevel(5)
 
 DELETED_FLAG: int = 1
+ROW_HEADER_SIZE: int = 5
 
 RecordHeader = namedtuple("RecordHeader", ["flags", "size"])
-
-
-# DiskStorage is a Log-Structured Hash Table as described in the BitCask paper. We
-# keep appending the data to a file, like a log. DiskStorage maintains an in-memory
-# hash table called KeyDir, which keeps the row's location on the disk.
-#
-# The idea is simple yet brilliant:
-#   - Write the record to the disk
-#   - Update the internal hash table to point to that byte offset
-#   - Whenever we get a read request, check the internal hash table for the address,
-#       fetch that and return
-#
-# KeyDir does not store values, only their locations.
-#
-# The above approach solves a lot of problems:
-#   - Writes are insanely fast since you are just appending to the file
-#   - Reads are insanely fast since you do only one disk seek. In B-Tree backed
-#       storage, there could be 2-3 disk seeks
-#
-# However, there are drawbacks too:
-#   - We need to maintain an in-memory hash table KeyDir. A database with a large
-#       number of keys would require more RAM
-#   - Since we need to build the KeyDir at initialisation, it will affect the startup
-#       time too
-#   - Deleted keys need to be purged from the file to reduce the file size
-#
-# Read the paper for more details: https://riak.com/assets/bitcask-intro.pdf
 
 
 class HadroDB:
     """
     Implements the KV store on the disk
-
-    Args:
-        file_name (str): name of the file where all the data will be written. Just
-            passing the file name will save the data in the current directory. You may
-            pass the full file location too.
-
-    Attributes:
-        file_name (str): name of the file where all the data will be written. Just
-            passing the file name will save the data in the current directory. You may
-            pass the full file location too.
-        file (typing.BinaryIO): file object pointing the file_name
-        write_position (int): current cursor position in the file where the data can be
-            written
-        key_dir (dict[str, KeyEntry]): is a map of key and KeyEntry being the value.
-            KeyEntry contains the position of the byte offset in the file where the
-            value exists. key_dir map acts as in-memory index to fetch the values
-            quickly from the disk
     """
 
     def __init__(self, collection: typing.Union[str, None] = None):
@@ -91,13 +48,8 @@ class HadroDB:
         if os.path.exists(collection):
             if not os.path.isdir(collection):
                 raise ValueError("Collection must be a folder")
-            # if the file exists already, then we will load the key_dir
-        #            self._init_key_dir()
         else:
             os.makedirs(collection, exist_ok=True)
-
-        #        if os.path.exists(self._schema_file):
-        #            load the schema
 
         # we open the file in `a+b` mode:
         # a - says the writes are append only. `a+` means we want append and read
@@ -132,21 +84,19 @@ class HadroDB:
         self._write(bytes_to_write)
 
         # update indices index
-        #
-
         self.write_position += len(bytes_to_write)
 
     def scan(self, columns=None, predicates=None):
-        block_size: int = 8 * 1024 * 1024  # read 1Mb at a time
+        block_size: int = 8 * 1024 * 1024  # read 8Mb at a time
         self.file.seek(0, 0)
 
         # TODO: read file header
 
         buffer = io.BufferedReader(self.file, block_size)  # type: ignore
 
-        header_bytes = buffer.read(5)
+        header_bytes = buffer.read(ROW_HEADER_SIZE)
         flags, size = struct.unpack(">BI", header_bytes)
-        block_start = 5  # start of the current block
+        block_start = ROW_HEADER_SIZE  # start of the current block
 
         while size > 0:
             if block_start + size > block_size:
@@ -170,11 +120,13 @@ class HadroDB:
                 yield self.rows.from_bytes(data_bytes)
 
             # Read the size of the next record
-            header_bytes = buffer.read(5)
+            header_bytes = buffer.read(ROW_HEADER_SIZE)
             if len(header_bytes) == 0:
                 break
             flags, size = struct.unpack(">BI", header_bytes)
-            block_start += 5  # add the size of the size field to the start of the next block
+            block_start += (
+                ROW_HEADER_SIZE  # add the size of the size field to the start of the next block
+            )
 
     def _write(self, data: bytes) -> None:
         # saving stuff to a file reliably is hard!
