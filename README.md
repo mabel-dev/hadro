@@ -50,9 +50,13 @@ Values Hash
 Flags (bytes)
     Value Store Compression Algo (0 = none, 1 = LZ4, 2 = zSTD)
 
+Column Names (not every record has every column)
+
+PK column name
+
 ### Statistics
 
-Column, Count, Min, Max
+Column, Count, Min, Max, unique values 
 
 ### Indexes
 
@@ -61,6 +65,11 @@ Key, Offset, Length
 - used for the PK index (mandatory) and other values (optional)
 
 Key is binary encoded and limited to 64 bytes, if the value is longer, it needs to be filtered from the value
+
+OR
+
+number of entries 
+value, bitmap
 
 ### Values
 
