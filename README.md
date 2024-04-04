@@ -50,6 +50,10 @@ Values Hash
 Flags (bytes)
     Value Store Compression Algo (0 = none, 1 = LZ4, 2 = zSTD)
 
+### Statistics
+
+Column, Count, Min, Max
+
 ### Indexes
 
 Key, Offset, Length
