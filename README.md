@@ -60,7 +60,7 @@ Column, Count, Min, Max, unique values
 
 ### Indexes
 
-Key, Offset, Length
+Key, Version, Offset, Length
 
 - used for the PK index (mandatory) and other values (optional)
 

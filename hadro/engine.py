@@ -8,16 +8,18 @@ Typical usage example:
     # it also supports dictionary style API too:
     disk["hamlet"] = "shakespeare"
 """
+
 import io
 import os.path
 import struct
 import typing
 from collections import namedtuple
 
-from hadro.config import WRITE_CONSISTENCY
-from hadro.config import ConsistencyMode
 from orso import logging
 from orso.row import Row
+
+from hadro.config import WRITE_CONSISTENCY
+from hadro.config import ConsistencyMode
 
 logging.set_log_name("MESOS")
 logger = logging.get_logger()
