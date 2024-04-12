@@ -14,5 +14,9 @@ test:
 	python -m pytest
 
 coverage:
+	clear
 	python -m coverage run -m pytest 
 	python -m coverage report --include=mabel/** -m
+
+compile:
+	python setup.py build_ext --inplace

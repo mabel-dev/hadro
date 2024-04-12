@@ -1,3 +1,2 @@
-from hadro.engine import HadroDB
-from hadro.version import __author__
-from hadro.version import __version__
+from hadro.__version__ import __author__
+from hadro.__version__ import __version__
