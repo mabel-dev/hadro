@@ -1,6 +1,4 @@
-import struct
-
-__build__ = 404
+__build__ = 1
 
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -20,6 +18,7 @@ Store the version here so:
 2) we can import it in setup.py for the same reason
 """
 from enum import Enum  # isort: skip
+import struct  # isort: skip
 
 
 class VersionStatus(Enum):
