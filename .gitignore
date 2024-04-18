@@ -1,3 +1,5 @@
 **.pyc
 temp/**
 scratch/**
+**.cpp
+**.o

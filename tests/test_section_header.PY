@@ -5,7 +5,9 @@ import struct
 sys.path.insert(1, os.path.join(sys.path[0], ".."))
 sys.path.insert(1, os.path.join(sys.path[0], "../.."))
 
-from hadro.serde.section_header import SectionHeader, SectionBlockTypes, SECTION_FLAG_LZ4_COMPRESSED
+from hadro.serde.section_header import SectionHeader
+from hadro.serde.section_header import SectionBlockTypes
+from hadro.serde.section_header import SECTION_FLAG_LZ4_COMPRESSED
 
 def test_section_header_initialization():
     header = SectionHeader(SectionBlockTypes.DATA_BLOCK, 123, SECTION_FLAG_LZ4_COMPRESSED)

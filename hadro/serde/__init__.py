@@ -1,4 +1,3 @@
-
 """
 | Component    | Description                                                                    |
 | ------------ | ------------------------------------------------------------------------------ |
@@ -15,20 +14,20 @@
 
 import io
 import struct
+from enum import Enum
 from typing import Any
 from typing import Dict
 
 import lz4.frame
 from ormsgpack import OPT_SERIALIZE_NUMPY
 from ormsgpack import packb
-from enum import Enum
 
 from hadro.__version__ import HEADER
 
 
-
 def magic_bytes(memory_table):
     return HEADER
+
 
 def key_and_data_block(memory_table):
     return b""

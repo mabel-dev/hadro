@@ -1,9 +1,8 @@
-
-
 import struct
 from enum import Enum
 
 SECTION_FLAG_LZ4_COMPRESSED: int = 1
+
 
 class SectionBlockTypes(int, Enum):
     DATA_BLOCK: int = 1
@@ -13,6 +12,7 @@ class SectionBlockTypes(int, Enum):
     INDEX_BLOCK: int = 5
     BLOCK_TABLE: int = 6
     METADATA_BLOCK: int = 7
+
 
 class SectionHeader:
     def __init__(self, section_type: SectionBlockTypes, section_length: int, flags: int = 0):
