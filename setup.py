@@ -5,7 +5,6 @@ from Cython.Build import cythonize
 from setuptools import Extension
 from setuptools import find_packages
 from setuptools import setup
-from setuptools_rust import RustExtension
 
 LIBRARY = "hadro"
 
