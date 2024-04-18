@@ -8,26 +8,6 @@ on:
 
 jobs:
 
-  build-linux-cp38:
-    runs-on: ubuntu-latest
-    container: quay.io/pypa/manylinux2014_x86_64
-
-    steps:
-    - uses: actions/checkout@master
-
-    - name: Install Python package dependencies
-      run: /opt/python/cp38-cp38/bin/python -m pip install --upgrade cython wheel numpy
-
-    - name: Build binary wheel
-      run: /opt/python/cp38-cp38/bin/python setup.py bdist_wheel
-
-    - name: Archive dist artifacts
-      uses: actions/upload-artifact@v1
-      with:
-        name: dist-linux-3.8
-        path: dist
-
-
   build-linux-cp39:
     runs-on: ubuntu-latest
     container: quay.io/pypa/manylinux2014_x86_64
@@ -36,7 +16,7 @@ jobs:
     - uses: actions/checkout@master
 
     - name: Install Python package dependencies
-      run: /opt/python/cp39-cp39/bin/python -m pip install --upgrade cython wheel numpy setuptools_rust
+      run: /opt/python/cp39-cp39/bin/python -m pip install --upgrade cython wheel numpy
 
     - name: Build binary wheel
       run: /opt/python/cp39-cp39/bin/python setup.py bdist_wheel
@@ -55,7 +35,7 @@ jobs:
     - uses: actions/checkout@master
 
     - name: Install Python package dependencies
-      run: /opt/python/cp310-cp310/bin/python -m pip install --upgrade cython wheel numpy setuptools_rust
+      run: /opt/python/cp310-cp310/bin/python -m pip install --upgrade cython wheel numpy
 
     - name: Build binary wheel
       run: /opt/python/cp310-cp310/bin/python setup.py bdist_wheel
@@ -74,7 +54,7 @@ jobs:
     - uses: actions/checkout@master
 
     - name: Install Python package dependencies
-      run: /opt/python/cp311-cp311/bin/python -m pip install --upgrade cython wheel numpy setuptools_rust
+      run: /opt/python/cp311-cp311/bin/python -m pip install --upgrade cython wheel numpy
 
     - name: Build binary wheel
       run: /opt/python/cp311-cp311/bin/python setup.py bdist_wheel
@@ -90,7 +70,7 @@ jobs:
     strategy:
       max-parallel: 4
       matrix:
-        python-version: ['3.8', '3.9', '3.10', '3.11']
+        python-version: ['3.9', '3.10', '3.11']
 
     steps:
     - uses: actions/checkout@master
@@ -107,7 +87,7 @@ jobs:
         python-version: ${{ matrix.python-version }}
 
     - name: Install Python package dependencies
-      run: python -m pip install --upgrade cython wheel numpy setuptools_rust
+      run: python -m pip install --upgrade cython wheel numpy
 
     - name: Build on macOS universal2
       shell: bash
@@ -129,7 +109,7 @@ jobs:
     strategy:
       max-parallel: 3
       matrix:
-        python-version: ['3.8', '3.9', '3.10', '3.11']
+        python-version: ['3.9', '3.10', '3.11']
 
     steps:
     - uses: actions/checkout@master
@@ -147,7 +127,7 @@ jobs:
         architecture: x64
 
     - name: Install Python package dependencies
-      run: python -m pip install --upgrade cython wheel numpy setuptools_rust
+      run: python -m pip install --upgrade cython wheel numpy
 
     - name: Build binary wheel
       run: python setup.py bdist_wheel
@@ -159,7 +139,7 @@ jobs:
         path: dist
 
   upload:
-    needs: [build-linux-cp38, build-linux-cp39, build-linux-cp310, build-linux-cp311, build-macos, build-windows]
+    needs: [build-linux-cp39, build-linux-cp310, build-linux-cp311, build-macos, build-windows]
     runs-on: ubuntu-latest
 
     steps:
@@ -179,12 +159,6 @@ jobs:
     - name: Create source dist
       run: python setup.py sdist
 
-    - name: Stage linux 3.8
-      uses: actions/download-artifact@v1
-      with:
-        name: dist-linux-3.8
-    - run: mv -v dist-linux-3.8/* dist/
-
     - name: Stage linux 3.9
       uses: actions/download-artifact@v1
       with:
@@ -203,12 +177,6 @@ jobs:
         name: dist-linux-3.11
     - run: mv -v dist-linux-3.11/* dist/
 
-    - name: Stage macos 3.8
-      uses: actions/download-artifact@v1
-      with:
-        name: dist-macos-3.8
-    - run: mv -v dist-macos-3.8/* dist/
-
     - name: Stage macos 3.9
       uses: actions/download-artifact@v1
       with:
@@ -226,12 +194,6 @@ jobs:
       with:
         name: dist-macos-3.11
     - run: mv -v dist-macos-3.11/* dist/
-
-    - name: Stage windows 3.8
-      uses: actions/download-artifact@v1
-      with:
-        name: dist-windows-3.8
-    - run: mv -v dist-windows-3.8/* dist/
 
     - name: Stage windows 3.9
       uses: actions/download-artifact@v1
