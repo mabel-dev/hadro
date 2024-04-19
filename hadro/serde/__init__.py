@@ -23,40 +23,26 @@ from ormsgpack import OPT_SERIALIZE_NUMPY
 from ormsgpack import packb
 
 from hadro.__version__ import HEADER
+from hadro.serde.data_and_key_block import create_blocks
+from hadro.serde.section_header import SectionBlockTypes
+from hadro.serde.section_header import SectionHeader
 
 
-def magic_bytes(memory_table):
-    return HEADER
+def commit_sstable(memory_table, location):
 
+    file = bytearray()
+    file += HEADER
 
-def key_and_data_block(memory_table):
-    return b""
+    data, keys = create_blocks(memory_table)
+    data_header = SectionHeader(SectionBlockTypes.DATA_BLOCK, len(data), flags=1).to_bytes()
 
+    file += data_header
+    file += data
 
-def write(memory_table):
-    buffer = io.BytesIO()
-    # Sort the keys (primary key and timestamp) for ordering in the SSTable
-    sorted_keys = sorted(memory_table.buffer.keys())
-    offsets_lengths = []
+    file += b"SCHEMA"
 
-    # Write value block to the buffer
-    for key in sorted_keys:
-        timestamp_ns, record = memory_table.buffer[key]
-        offset = buffer.tell()
-        buffer.write(record)
-        length = len(record)
-        offsets_lengths.append((key, timestamp_ns, offset, length))
+    key_header = SectionHeader(SectionBlockTypes.KEY_BLOCK, len(keys), flags=0).to_bytes()
+    file += key_header
+    file += keys
 
-    compressed_batch = lz4.frame.compress(buffer.getvalue())
-    print(len(compressed_batch))
-
-    # Prepare and write the key block to the buffer
-    key_block_start = buffer.tell()
-    for pk, timestamp_ns, offset, length in offsets_lengths:
-        # Adjust struct packing as necessary for your key types
-        buffer.write(struct.pack("qqII", pk, timestamp_ns, offset, length))
-
-    # Store the start of the key block for later retrieval
-    buffer.write(struct.pack("q", key_block_start))
-
-    return buffer
+    print(len(file))

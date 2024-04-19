@@ -27,3 +27,8 @@ class SectionHeader:
     def from_bytes(cls, bytes_data):
         type_val, len_val, flag_val = struct.unpack("BIB", bytes_data)
         return cls(SectionBlockTypes(type_val), len_val, flag_val)
+
+    @staticmethod
+    def writer(section_type: SectionBlockTypes, section_length: int, flags: int = 0) -> bytes:
+        sh = SectionHeader(section_type=section_type, section_length=section_length, flags=flags)
+        return sh.to_bytes()
