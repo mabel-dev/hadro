@@ -16,6 +16,7 @@ from typing import Tuple
 import numpy
 import ormsgpack
 from orso.schema import RelationSchema
+from orso.tools import monitor
 
 from hadro.exceptions import MaximumRecordsExceeded
 
@@ -36,7 +37,7 @@ class MemTable:
         column_names (Tuple[str]): Sorted tuple of column names derived from the schema for consistent record serialization.
     """
 
-    def __init__(self, schema: RelationSchema, max_records: int = 10000):
+    def __init__(self, schema: RelationSchema, max_records: int = 50000):
         """
         Initializes the MemoryTable with an empty buffer and specified configurations based on the provided schema.
 
@@ -76,6 +77,8 @@ class MemTable:
                 return list(value)
             return str(value)
 
+        if hasattr(record, "as_dict"):
+            record = record.as_dict
         primary_key = record.get(self.pk_field_name)
         if primary_key is None:
             raise ValueError("Primary Key cannot be missing or have None value")
@@ -95,21 +98,17 @@ class MemTable:
         if len(self.buffer) >= self.max_records:
             raise MaximumRecordsExceeded(self)
 
+    @monitor()
     def flush(self):
         """
         Flushes the current in-memory buffer to durable storage. This operation clears the buffer and resets
         the buffer size counter.
         """
-        self._persist_to_storage()
+        from hadro.serde import commit_sstable
+
+        commit_sstable(memory_table=self, location=f"{hex(time.time_ns())}.hadro")
         self.buffer.clear()
         self.buffer_size = 0
-
-    def _persist_to_storage(self):
-        """
-        Internal method to persist buffered log entries to durable storage.
-        This is a placeholder that should be overridden with actual storage logic.
-        """
-        pass  # Implementation of persistence logic
 
     def _get(self, pk: Any) -> Optional[Tuple[int, bytes]]:
         """
