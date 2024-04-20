@@ -10,6 +10,10 @@ Hadro is a database storage engine for [Opteryx](https://opteryx.dev).
 
 </div>
 
+## Get It
+
+`pip install hadro`
+
 ## License
 
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/mabel-dev/hadro/blob/main/LICENSE)
@@ -17,60 +21,10 @@ Hadro is a database storage engine for [Opteryx](https://opteryx.dev).
 
 ## Status
 
-[![Status](https://img.shields.io/badge/Status-alpha-orange)](https://github.com/mabel-dev/hadro)
+[![Status](https://img.shields.io/badge/Status-pre-alpha-orange)](https://github.com/mabel-dev/hadro)
 
-Hadro is in alpha. Alpha means different things to different people, to us, being alpha means:
+Hadro is in pre-alpha. This means different things to different people, to us, being pre-alpha means:
 
-- Interfaces may be significantly changed
-- The data file format is unstable
-- Expected functionality is missing
-- Things that worked yesterday, don't work today
-- The results of the system may be unreliable
+- There is not enough of a system to provide a usable service
 
-As such, we really don't recommend using HadroDB anywhere where your data matters.
-
-## File Format
-
-### Magic Bytes
-
-`HADRO`
-
-### Version
-
-`001`
-
-### Header
-
-Section table - Type, Offset, Size, Compression Algo
-
-Record Count
-
-Values Hash
-
-Flags (bytes)
-    Value Store Compression Algo (0 = none, 1 = LZ4, 2 = zSTD)
-
-Column Names (not every record has every column)
-
-PK column name
-
-### Statistics
-
-Column, Count, Min, Max, unique values 
-
-### Indexes
-
-Key, Version, Offset, Length
-
-- used for the PK index (mandatory) and other values (optional)
-
-Key is binary encoded and limited to 64 bytes, if the value is longer, it needs to be filtered from the value
-
-OR
-
-number of entries 
-value, bitmap
-
-### Values
-
-Entries of MsgPack bytes
+As such, we don't recommend using HadroDB anywhere where your data matters.
