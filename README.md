@@ -21,7 +21,7 @@ Hadro is a database storage engine for [Opteryx](https://opteryx.dev).
 
 ## Status
 
-[![Status](https://img.shields.io/badge/Status-pre-alpha-orange)](https://github.com/mabel-dev/hadro)
+[![Status](https://img.shields.io/badge/Status-prealpha-orange)](https://github.com/mabel-dev/hadro)
 
 Hadro is in pre-alpha. This means different things to different people, to us, being pre-alpha means:
 
