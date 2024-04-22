@@ -50,7 +50,7 @@ class MemTable:
         self.buffer_size = 0
         self.max_records = max_records
         self.pk_field_name = schema.primary_key
-        self.schema = schema
+        self.schema:RelationSchema = schema
         self.column_names = tuple(sorted(schema.column_names))
 
     def append(self, record: Dict):
@@ -106,7 +106,7 @@ class MemTable:
         """
         from hadro.serde import commit_sstable
 
-        commit_sstable(memory_table=self, location=f"{hex(time.time_ns())}.hadro")
+        commit_sstable(memory_table=self, location=f"data/{hex(time.time_ns())}.hadro")
         self.buffer.clear()
         self.buffer_size = 0
 

@@ -3,3 +3,4 @@ temp/**
 scratch/**
 **.cpp
 **.o
+data/*.hadro
