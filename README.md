@@ -85,9 +85,15 @@ The implementation uses:
 
 ## Running the Service
 
+Requires Python 3.10+.
+
 ```bash
+pip install -e .            # runtime dependencies
+pip install -e '.[test]'    # plus test dependencies
 python src/main.py
 ```
+
+Or use `make run`, which creates a `.venv`, installs the package and starts the service with the local storage backend.
 
 The service will start on port 8080 (or the port specified in the `PORT` environment variable).
 
