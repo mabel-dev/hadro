@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=69", "wheel"]
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,6 +7,8 @@ name = "hadro"
 dynamic = ["version"]
 description = "A small, read-only, S3-compatible server for local directories and Google Cloud Storage, with S3 Select over Parquet."
 readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 requires-python = ">=3.10"
 authors = [{ name = "Justin Joyce" }]
 keywords = ["s3", "emulator", "s3-select", "parquet", "gcs", "testing"]

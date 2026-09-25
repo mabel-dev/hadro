@@ -186,3 +186,7 @@ make run       # serves ./data on port 8080
   `STORAGE_CACHE_SIZE` (a count of objects) is replaced by `HADRO_CACHE_MB`.
 - The default backend is now `local`, and the default host is `127.0.0.1`.
 - Errors are S3 XML documents (`NoSuchKey`, `NoSuchBucket`, ...) instead of plain text.
+
+## License
+
+Apache 2.0; see [LICENSE](LICENSE).
