@@ -7,9 +7,11 @@ from rugo import jsonl as rugo_jsonl
 from rugo import parquet as rugo_parquet
 
 from hadro.select import BATCH_ROWS, execute
-from hadro.select.evaluate import compile_condition, plan
+from hadro.select.evaluate import compile_mask, conjuncts, plan
 from hadro.select.formats import InputFormat, OutputFormat
 from hadro.select.sql import SQLError, parse
+
+from . import reference
 
 PARQUET = {"Parquet": {}}
 
@@ -123,49 +125,69 @@ def test_nested_and_binary_values_serialise(s3):
     assert all(isinstance(r["birth_place"], (str, type(None))) for r in rows)
 
 
-@pytest.mark.parametrize(
-    "sql",
-    [
-        "SELECT name FROM S3Object WHERE space_flights > 5",
-        "SELECT name FROM S3Object WHERE space_flights > 2 AND year <= 1990",
-        "SELECT name FROM S3Object WHERE year IN (1996, 1998) AND gender = 'Male'",
-        "SELECT name FROM S3Object WHERE year NOT IN (1996, 2004)",
-        "SELECT name FROM S3Object WHERE birth_date >= '1960-01-01' AND name LIKE '%a%'",
-        "SELECT name FROM S3Object WHERE 3 < space_flights",
-        "SELECT name FROM S3Object WHERE space_flights > 2.5",
-        "SELECT name FROM S3Object WHERE status != 'Active'",
-    ],
-)
-def test_rugo_pushdown_matches_python(data_dir, sql):
-    """Predicates pushed into rugo must select exactly what Python evaluation selects."""
-    content = (data_dir / "astronauts/astronauts.parquet").read_bytes()
-
-    def run(pushdown):
-        return b"".join(execute(content, sql, InputFormat(), OutputFormat(), pushdown=pushdown))
-
-    assert run(True) == run(False)
-
-
 def test_pushdown_plan():
-    names = ["a", "b", "d"]
-    kinds = {"a": "int", "b": "str", "d": "date"}
+    names = ["a", "b", "d", "t", "l"]
+    kinds = {"a": "int", "b": "str", "d": "date", "t": "datetime", "l": "other"}
     where = parse(
         "SELECT * FROM S3Object WHERE a > 1 AND 'x' = b AND d < '2020-01-01' "
-        "AND (a = 1 OR b = 'y') AND a IN (1, 2) AND a > 1.5 AND b LIKE 'x%'"
+        "AND a IN (1, 2) AND NOT a IN (5) AND b IS NULL AND NOT d IS NULL "
+        "AND a BETWEEN 1 AND 9 AND NOT a >= 7 AND t > '2020-01-01T00:00:00' "
+        "AND (a = 1 OR b = 'y') AND b LIKE 'x%' AND a NOT BETWEEN 2 AND 3 "
+        "AND l = 'x' AND a IN (1, NULL) AND a = b"
     ).where
-    pushed, residual = plan(where, names, kinds, allow_in=True)
-    assert pushed[:3] == [("a", ">", 1), ("b", "==", "x"), ("d", "<", pushed[2][2])]
-    assert str(pushed[2][2]) == "2020-01-01"
-    assert pushed[3] == ("a", "in", [1, 2])
-    assert len(pushed) == 4  # the OR, the float comparison and the LIKE stay in Python
-    assert residual is not None
+    pushed, residual = plan(where, names, kinds, "parquet")
+    assert [(c, op) for c, op, _ in pushed] == [
+        ("a", ">"), ("b", "=="), ("d", "<"), ("a", "in"), ("a", "not in"),
+        ("b", "is null"), ("d", "is not null"), ("a", ">="), ("a", "<="), ("a", "<"), ("t", ">"),
+    ]  # fmt: skip
+    assert str(pushed[2][2]) == "2020-01-01" and pushed[10][2].tzinfo is not None
+    # OR, LIKE, NOT BETWEEN, list columns, NULL list members and column-to-column stay native.
+    assert len(conjuncts(residual)) == 6
+
+    json_kinds = {"a": "int", "b": "str", "d": "str", "t": "str", "l": "other"}
+    json_pushed, _ = plan(where, names, json_kinds, "json")
+    assert {op for _, op, _ in json_pushed} >= {"in", "not in", "is null", "is not null"}
+
+    # CSV types are unknown up front: comparisons are pushed with the literal as written.
+    csv_pushed, csv_residual = plan(where, names, {}, "csv")
+    assert ("a", ">", 1) in csv_pushed and ("b", "==", "x") in csv_pushed
+    assert ("d", "<", "2020-01-01") in csv_pushed
+    assert {op for _, op, _ in csv_pushed} <= {"==", "!=", "<", "<=", ">", ">="}
+    assert csv_residual is not None
 
 
-def test_three_valued_logic():
+def test_mask_three_valued_logic():
+    with rugo_jsonl.read_jsonl(
+        b'{"x": null, "y": "a"}\n{"x": 3, "y": "abc"}\n{"x": 1, "y": null}\n'
+    ) as reader:
+        morsel = next(iter(reader))
+
+    def mask(where):
+        return compile_mask(
+            parse(f"SELECT * FROM S3Object WHERE {where}").where, morsel
+        ).to_pylist()
+
+    assert mask("x > 1") == [None, True, False]
+    assert mask("NOT x > 1") == [None, False, True]
+    assert mask("x > 1 OR y = 'a'") == [True, True, None]
+    assert mask("x > 1 AND y = 'b'") == [False, False, False]  # NULL AND FALSE is FALSE
+    assert mask("x IS NULL") == [True, False, False]
+    assert mask("x NOT IN (1, 2)") == [None, True, False]
+    assert mask("x NOT IN (1, NULL)") == [None, None, False]
+    assert mask("x IN (3, NULL)") == [None, True, None]
+    assert mask("y LIKE 'a%'") == [True, True, None]
+    assert mask("y LIKE 'a_c'") == [False, True, None]
+    assert mask("y NOT LIKE '%'") == [False, False, None]
+    assert mask("x BETWEEN 1 AND 2") == [None, False, True]
+    assert mask("1 = NULL") == [None, None, None]
+
+
+def test_reference_three_valued_logic():
+    """The Python oracle itself must follow SQL's rules."""
     names, kinds = ["x", "y"], {"x": "int", "y": "str"}
 
     def check(where, row):
-        condition = compile_condition(
+        condition = reference.compile_condition(
             parse(f"SELECT * FROM S3Object WHERE {where}").where, names, kinds
         )
         return condition(row)
@@ -315,12 +337,8 @@ def test_csv_input_other_delimiter(s3):
     assert rows == [{"city": "Helsinki, FI"}]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="rugo 0.4.40 treats backslash as an escape inside quoted CSV fields (RFC 4180 has "
-    "no escapes), so tweets.csv is misread. Remove this marker once rugo is fixed.",
-)
 def test_csv_backslash_in_quoted_field(s3):
+    """tweets.csv has quoted fields containing backslashes (RFC 4180 has no escapes)."""
     rows = _rows(
         s3,
         "SELECT username FROM S3Object WHERE username = 'wugeej' LIMIT 1",
