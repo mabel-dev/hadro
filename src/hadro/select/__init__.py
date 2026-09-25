@@ -22,7 +22,7 @@ from rugo import parquet as rugo_parquet
 from ..errors import S3Error
 from ..s3xml import find, find_text
 from . import eventstream
-from .evaluate import columns_used, compile_condition, kind, normalise, plan, resolve_column
+from .evaluate import columns_used, compile_mask, kind, plan, resolve_column
 from .formats import InputFormat, OutputFormat, serialise
 from .sql import Query, SQLError, parse
 
@@ -167,25 +167,23 @@ def _run(content: bytes, query: Query, source: InputFormat, pushdown: bool) -> M
         needed = list(dict.fromkeys([s for s, _ in projection] + columns_used(query.where, names)))
 
     predicates, residual = [], query.where
-    if pushdown and source.format == "parquet":
-        predicates, residual = plan(query.where, names, kinds, allow_in=True)
+    if pushdown:
+        predicates, residual = plan(query.where, names, kinds, source.format)
 
     morsel = _read(content, source, needed, predicates, names)
+    if predicates and source.format == "json" and morsel is not None:
+        # JSONL types are inferred from a sample; if rugo typed a filtered column
+        # differently from the metadata, its predicate may have been compared as
+        # the wrong type. Read again and filter everything natively instead.
+        actual = {name: kind(t) for name, t in _schema(morsel).items()}
+        if any(actual.get(column) != kinds.get(column) for column, _, _ in predicates):
+            predicates, residual = [], query.where
+            morsel = _read(content, source, needed, predicates, names)
     if morsel is None:
         return None
 
     if residual is not None:
-        kinds = {name.decode(): kind(t) for name, t in _schema(morsel).items()}
-        present = [n.decode() for n in morsel.column_names]
-        condition = compile_condition(residual, present, kinds)
-        used = columns_used(residual, present)
-        columns = [normalise(morsel.column(n.encode()).to_pylist(), kinds[n]) for n in used]
-        keep = [
-            index
-            for index, values in enumerate(zip(*columns))
-            if condition(dict(zip(used, values))) is True
-        ]
-        morsel = morsel.take(keep)
+        morsel = morsel.filter_mask(compile_mask(residual, morsel))
 
     if query.limit is not None and query.limit < morsel.num_rows:
         morsel = morsel.take(list(range(query.limit)))
@@ -194,8 +192,8 @@ def _run(content: bytes, query: Query, source: InputFormat, pushdown: bool) -> M
     return morsel
 
 
-def _schema(morsel: Morsel) -> dict:
-    return {(k if isinstance(k, bytes) else k.encode()): v for k, v in morsel.schema.items()}
+def _schema(morsel: Morsel) -> dict[str, object]:
+    return {(k.decode() if isinstance(k, bytes) else k): v for k, v in morsel.schema.items()}
 
 
 def _describe(content: bytes, source: InputFormat) -> tuple[list[str], dict[str, str]]:
@@ -211,7 +209,8 @@ def _describe(content: bytes, source: InputFormat) -> tuple[list[str], dict[str,
         if source.format == "parquet":
             columns = rugo_parquet.read_metadata(content).schema_columns
             return [c.name for c in columns], {c.name: kind(c.logical_type) for c in columns}
-        return [c["name"] for c in rugo_jsonl.read_metadata(content).schema_columns], {}
+        columns = rugo_jsonl.read_metadata(content).schema_columns
+        return [c["name"] for c in columns], {c["name"]: kind(c["type"]) for c in columns}
     except (RuntimeError, ValueError) as exc:
         raise _unreadable(source, exc) from None
 
@@ -224,7 +223,11 @@ def _read(content, source: InputFormat, needed, predicates, names) -> Morsel | N
             ) as reader:
                 morsels = list(reader)
         elif source.format == "json":
-            with rugo_jsonl.read_jsonl(content, columns=needed) as reader:
+            if predicates and needed is None:
+                needed = names  # rugo returns only the filtered columns otherwise
+            with rugo_jsonl.read_jsonl(
+                content, columns=needed, predicates=predicates or None
+            ) as reader:
                 morsels = list(reader)
         else:
             with rugo_csv.read_csv(

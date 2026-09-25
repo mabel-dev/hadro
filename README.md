@@ -169,13 +169,22 @@ Objects are read with [rugo](https://pypi.org/project/rugo/), the reader Opteryx
 
 | Input | |
 | --- | --- |
-| Parquet | Column selection, and simple `AND`ed conditions (`col < 5`, `col IN (...)`) are pushed into rugo, which skips row groups and filters rows as it reads |
+| Parquet | Column selection; filters pushed into rugo, which skips row groups on footer statistics and filters rows as it decodes |
 | JSON Lines | `<JSON><Type>LINES</Type></JSON>`; `CompressionType` `GZIP` or `BZIP2` allowed |
 | CSV | `FileHeaderInfo` `USE` (columns by name) or `NONE`/`IGNORE` (`_1`, `_2`, ...); single-character `FieldDelimiter`; `GZIP`/`BZIP2` allowed |
 
-Conditions rugo can't apply (`OR`, `LIKE`, `IS NULL`...) are evaluated over the rows it returns,
-with SQL's NULL semantics. Column types come from the Parquet footer, or are inferred by rugo for
-JSON Lines and CSV, so `WHERE age > 30` compares numbers.
+Filtering is native throughout:
+
+- Every top-level `AND`ed condition the input's rugo reader applies exactly is pushed into it:
+  comparisons (including `NOT a > 1` and `BETWEEN`) for Parquet and JSON Lines, plus `IN`,
+  `NOT IN` and `IS [NOT] NULL` for Parquet.
+- Everything else (`OR`, `NOT BETWEEN`, `LIKE`, column-to-column comparisons...) is evaluated
+  as Draken boolean vectors, which follow SQL's NULL semantics. `LIKE 'prefix%'` and exact
+  patterns use the compare kernels; other patterns are matched in Python on that column only.
+- Column types come from the Parquet footer, or are inferred by rugo for JSON Lines and CSV, so
+  `WHERE age > 30` compares numbers and `birth_date < '1960-01-01'` compares dates.
+
+The test suite checks every filtering path against a plain-Python reference evaluator.
 
 Output can be JSON Lines or CSV (with custom delimiters and quoting), or **Parquet**.
 Parquet output is a hadro extension: send `<OutputSerialization><Parquet/></OutputSerialization>`,
