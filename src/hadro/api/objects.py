@@ -127,7 +127,7 @@ async def post_object(request: Request, bucket: str, key: str) -> Response:
         raise MethodNotAllowed()
 
     body = await request.body()
-    expression, output = select.parse_request(body)
+    expression, source, output = select.parse_request(body)
 
     def run():
         backend = _backend(request)
@@ -136,7 +136,7 @@ async def post_object(request: Request, bucket: str, key: str) -> Response:
             if not backend.bucket_exists(bucket):
                 raise NoSuchBucket(bucket)
             raise NoSuchKey(key)
-        return select.execute(content, expression, output)
+        return select.execute(content, expression, source, output)
 
     events = await run_in_threadpool(run)
     return StreamingResponse(events, media_type="application/octet-stream")

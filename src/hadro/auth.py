@@ -12,7 +12,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 from collections.abc import Mapping
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from urllib.parse import parse_qsl, quote
 
 from .errors import S3Error
@@ -75,7 +75,7 @@ def verify(
     ``raw_path`` must be the path exactly as sent (still percent-encoded);
     ``headers`` must use lower-case names.
     """
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     query = parse_qsl(query_string, keep_blank_values=True)
     query_map = dict(query)
 
@@ -90,7 +90,7 @@ def verify(
         query = [(k, v) for k, v in query if k != "X-Amz-Signature"]
         try:
             expires = int(query_map.get("X-Amz-Expires", "0"))
-            signed_at = datetime.strptime(amz_date, "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc)
+            signed_at = datetime.strptime(amz_date, "%Y%m%dT%H%M%SZ").replace(tzinfo=UTC)
         except ValueError:
             raise S3Error("AuthorizationQueryParametersError", "Malformed presigned URL.") from None
         if now > signed_at + timedelta(seconds=expires):

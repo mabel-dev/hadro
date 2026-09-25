@@ -7,17 +7,13 @@
 
 Conditions support comparisons (= != <> < <= > >=), IS [NOT] NULL,
 [NOT] IN (...), [NOT] BETWEEN ... AND ..., [NOT] LIKE, combined with
-AND / OR / NOT and parentheses. Conditions compile to a pyarrow compute
-expression so filtering is pushed into the Parquet reader.
+AND / OR / NOT and parentheses. ``evaluate`` runs parsed queries.
 """
 
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-
-import pyarrow as pa
-import pyarrow.compute as pc
 
 
 class SQLError(ValueError):
@@ -337,83 +333,3 @@ class _Parser:
 
 def parse(sql: str) -> Query:
     return _Parser(sql).parse()
-
-
-# --- Compilation against a schema --------------------------------------------
-
-
-def resolve_column(schema: pa.Schema, column: Column) -> str:
-    if column.name in schema.names:
-        return column.name
-    if not column.quoted:
-        # Unquoted identifiers are case-insensitive in S3 Select.
-        matches = [name for name in schema.names if name.lower() == column.name.lower()]
-        if len(matches) == 1:
-            return matches[0]
-    raise SQLError(f"Column {column.name!r} does not exist.")
-
-
-def _scalar(value: object, target: pa.DataType | None) -> pa.Scalar:
-    if target is None or value is None:
-        return pa.scalar(value) if target is None else pa.scalar(None, type=target)
-    try:
-        if isinstance(value, float) and pa.types.is_integer(target):
-            return pa.scalar(value)  # let Arrow compare 3 against 2.5
-        return pa.scalar(value).cast(target)
-    except (pa.ArrowInvalid, pa.ArrowNotImplementedError, pa.ArrowTypeError):
-        raise SQLError(f"Cannot compare {value!r} with a column of type {target}.") from None
-
-
-class _Compiler:
-    def __init__(self, schema: pa.Schema):
-        self.schema = schema
-
-    def field_type(self, operand: Operand) -> pa.DataType | None:
-        if isinstance(operand, Column):
-            return self.schema.field(resolve_column(self.schema, operand)).type
-        return None
-
-    def operand(self, operand: Operand, other: Operand | None = None) -> pc.Expression:
-        if isinstance(operand, Column):
-            return pc.field(resolve_column(self.schema, operand))
-        target = self.field_type(other) if other is not None else None
-        return pc.scalar(_scalar(operand.value, target))
-
-    def compile(self, node: Condition) -> pc.Expression:
-        if isinstance(node, BoolOp):
-            left, right = self.compile(node.left), self.compile(node.right)
-            return (left & right) if node.op == "AND" else (left | right)
-        if isinstance(node, Not):
-            return ~self.compile(node.operand)
-        if isinstance(node, Comparison):
-            left = self.operand(node.left, node.right)
-            right = self.operand(node.right, node.left)
-            return {
-                "=": left.__eq__, "!=": left.__ne__, "<": left.__lt__,
-                "<=": left.__le__, ">": left.__gt__, ">=": left.__ge__,
-            }[node.op](right)  # fmt: skip
-        if isinstance(node, IsNull):
-            expression = self.operand(node.operand).is_null()
-            return ~expression if node.negated else expression
-        if isinstance(node, InList):
-            target = self.field_type(node.operand)
-            values = [_scalar(v.value, target) for v in node.values]
-            value_set = pa.array([v.as_py() for v in values], type=target or values[0].type)
-            operand = self.operand(node.operand)
-            expression = operand.isin(value_set)
-            # isin() is false (not null) for nulls, so NOT IN must exclude them itself.
-            return (~expression & operand.is_valid()) if node.negated else expression
-        if isinstance(node, Between):
-            value = self.operand(node.operand)
-            low = self.operand(node.low, node.operand)
-            high = self.operand(node.high, node.operand)
-            expression = (value >= low) & (value <= high)
-            return ~expression if node.negated else expression
-        if isinstance(node, Like):
-            expression = pc.match_like(self.operand(node.operand), node.pattern)
-            return ~expression if node.negated else expression
-        raise SQLError(f"Unsupported condition {node!r}.")  # pragma: no cover
-
-
-def compile_filter(condition: Condition, schema: pa.Schema) -> pc.Expression:
-    return _Compiler(schema).compile(condition)

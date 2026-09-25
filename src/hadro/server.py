@@ -9,8 +9,7 @@ from __future__ import annotations
 import socket
 import threading
 import time
-
-from typing_extensions import Self
+from typing import Self
 
 from .config import Config
 

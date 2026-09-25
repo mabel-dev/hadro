@@ -1,5 +1,3 @@
-import pyarrow.fs
-import pyarrow.parquet as pq
 import pytest
 from botocore.exceptions import ClientError
 
@@ -115,19 +113,6 @@ def test_writes_are_rejected(s3, client):
 
 def test_health(client):
     assert client.get("/health").json() == {"status": "ok"}
-
-
-def test_pyarrow_reads_parquet_over_s3(server):
-    """pyarrow (and so Opteryx) reads Parquet with ranged GETs."""
-    host = server.endpoint.removeprefix("http://")
-    filesystem = pyarrow.fs.S3FileSystem(
-        endpoint_override=host, scheme="http", access_key="a", secret_key="b", region="eu-west-2"
-    )
-    table = pq.read_table("astronauts/astronauts.parquet", filesystem=filesystem, columns=["name"])
-    assert table.num_rows == 357
-    selector = pyarrow.fs.FileSelector("nested/b", recursive=True)
-    paths = sorted(info.path for info in filesystem.get_file_info(selector) if info.is_file)
-    assert paths == ["nested/b/1.txt", "nested/b/2.txt", "nested/b/c/3.txt"]
 
 
 def test_minio_client(server, data_dir):

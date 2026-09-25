@@ -1,6 +1,6 @@
 import base64
 import hashlib
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
@@ -45,7 +45,7 @@ def test_gcs_metadata_mapping():
     blob = SimpleNamespace(
         name="a/b.parquet",
         size="5",
-        updated=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        updated=datetime(2026, 1, 1, tzinfo=UTC),
         md5_hash=base64.b64encode(digest).decode(),
         etag="CJ",
         content_type=None,

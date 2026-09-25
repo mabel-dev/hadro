@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 import requests
@@ -72,7 +72,7 @@ def test_presigned_url(secured):
 
 
 def test_presigned_url_expiry():
-    signed_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    signed_at = datetime(2026, 1, 1, tzinfo=UTC)
     query = (
         "X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIDTEST%2F20260101%2Feu-west-2%2Fs3"
         "%2Faws4_request&X-Amz-Date=20260101T000000Z&X-Amz-Expires=60"

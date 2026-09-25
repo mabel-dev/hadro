@@ -6,7 +6,7 @@ import hashlib
 import mimetypes
 import os
 from collections.abc import Iterator
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from .base import BucketInfo, ObjectInfo, StorageBackend
@@ -45,7 +45,7 @@ class LocalBackend(StorageBackend):
         return ObjectInfo(
             key=key,
             size=stat.st_size,
-            last_modified=datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc),
+            last_modified=datetime.fromtimestamp(stat.st_mtime, tz=UTC),
             etag=f'"{digest}"',
             content_type=_content_type(key),
         )
@@ -54,7 +54,7 @@ class LocalBackend(StorageBackend):
         if not self.root.is_dir():
             return []
         return [
-            BucketInfo(entry.name, datetime.fromtimestamp(entry.stat().st_ctime, tz=timezone.utc))
+            BucketInfo(entry.name, datetime.fromtimestamp(entry.stat().st_ctime, tz=UTC))
             for entry in sorted(self.root.iterdir(), key=lambda p: p.name)
             if entry.is_dir() and not entry.name.startswith(".")
         ]

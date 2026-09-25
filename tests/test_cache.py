@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from hadro.storage import CachedBackend, ObjectInfo, StorageBackend
 
@@ -12,7 +12,7 @@ class CountingBackend(StorageBackend):
         content = self.objects.get(key)
         if content is None:
             return None
-        return ObjectInfo(key, len(content), datetime.now(timezone.utc), '"x"')
+        return ObjectInfo(key, len(content), datetime.now(UTC), '"x"')
 
     def get_object(self, bucket, key, start=None, end=None):
         self.gets.append((key, start, end))
