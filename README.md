@@ -1,124 +1,188 @@
-# S1
+# hadro
 
-Implementing only a little bit of S3
+A small, **read-only**, S3-compatible server. Point it at a local directory, or at
+Google Cloud Storage, and use any S3 client (boto3, MinIO, pyarrow, Opteryx, the AWS CLI)
+to list, download and query the data, including **S3 Select** over Parquet.
 
-## Overview
+It's useful for:
 
-S1 is a lightweight S3-compatible API implementation that provides core S3 services for reading data from Google Cloud Storage (GCS). It implements the following S3 APIs:
+- **Tests:** give code that reads from S3 a real endpoint with no AWS account or Docker.
+- **Local development:** serve a folder of Parquet/CSV/JSON files as buckets.
+- **An S3 front-end for GCS:** expose GCS buckets to S3-only tools, with an in-memory cache.
 
-### Implemented Features
+hadro evolved from S1 and the `cache.opteryx.app` Cloud Run service.
 
-1. **GetBucketLocation** - Returns the region where the bucket resides
-2. **ListObjects** - Lists objects in a bucket with support for filtering
-3. **GetObject** - Retrieves objects from a bucket
-4. **SelectObjectContent (S3 Select)** - Enables SQL queries on S3 objects for data filtering and transformation
-
-## API Endpoints
-
-### 1. GetBucketLocation
-```
-GET /{bucket}?location
-```
-Returns the AWS region for the bucket (always returns `eu-west-2`).
-
-### 2. ListObjects
-```
-GET /{bucket}?delimiter={delimiter}&prefix={prefix}&max-keys={max-keys}&marker={marker}
-```
-Lists objects in a bucket. Supports query parameters:
-- `prefix` - Limits response to keys that begin with the specified prefix
-- `delimiter` - Character used to group keys
-- `max-keys` - Maximum number of keys to return (default: 1000)
-- `marker` - Key to start with when listing objects
-
-### 3. GetObject
-```
-GET /{bucket}/{object}
-```
-Retrieves an object from the bucket.
-
-### 4. SelectObjectContent (S3 Select)
-```
-POST /{bucket}/{object}?select&select-type=2
-```
-Performs SQL queries on objects stored in S3. The request body should contain XML with:
-- SQL expression
-- Input serialization format (Parquet only)
-- Output serialization format (CSV or JSON)
-
-**Note**: The SQL API only supports Parquet files. For accessing other file types (CSV, JSON, etc.), use the GetObject endpoint.
-
-#### Example Request Body:
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<SelectObjectContentRequest xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
-    <Expression>SELECT * FROM S3Object WHERE price > 100</Expression>
-    <ExpressionType>SQL</ExpressionType>
-    <InputSerialization>
-        <Parquet/>
-    </InputSerialization>
-    <OutputSerialization>
-        <JSON/>
-    </OutputSerialization>
-</SelectObjectContentRequest>
-```
-
-## Supported S3 Select Features
-
-- **Input Formats**: Parquet only
-- **Output Formats**: CSV, JSON
-- **SQL Operations**: 
-  - SELECT with column specification or wildcard (*)
-  - Basic WHERE clause filtering
-  - Queries against S3Object alias
-
-**Important**: The SQL API (SelectObjectContent) only supports Parquet files. For other file formats like CSV or JSON, use the GetObject API for blob access.
-
-## Architecture
-
-The implementation uses:
-- **FastAPI** for the web framework
-- **Storage abstraction layer** supporting both Google Cloud Storage and local filesystem
-- **LRU caching** for improved read performance using Python's `functools.lru_cache`
-- **XML parsing** for S3 Select request handling
-- **Parquet support** for SQL queries (other formats available via GetObject)
-
-## Running the Service
-
-Requires Python 3.10+.
+## Install
 
 ```bash
-pip install -e .            # runtime dependencies
-pip install -e '.[test]'    # plus test dependencies
-python src/main.py
+pip install hadro          # local directories
+pip install 'hadro[gcs]'   # plus Google Cloud Storage
 ```
 
-Or use `make run`, which creates a `.venv`, installs the package and starts the service with the local storage backend.
+## Run
 
-The service will start on port 8080 (or the port specified in the `PORT` environment variable).
+```bash
+hadro ./data               # every sub-directory of ./data is a bucket
+```
 
-## Storage Backend
+```text
+data/
+├── astronauts/            -> s3://astronauts
+│   └── astronauts.parquet -> s3://astronauts/astronauts.parquet
+└── planets/
+    └── planets.parquet
+```
 
-S1 supports two storage backends:
+Then use it like any S3 endpoint (hadro only supports path-style addressing):
 
-### Google Cloud Storage (GCS)
-The default backend uses Google Cloud Storage (GCS). When `STORAGE_EMULATOR_HOST` environment variable is set, it connects to a storage emulator for testing purposes.
+```python
+import boto3
+from botocore.config import Config
 
-### Local Filesystem
-S1 can also use the local filesystem as a storage backend, which is useful for testing or development environments.
+s3 = boto3.client(
+    "s3",
+    endpoint_url="http://127.0.0.1:8080",
+    aws_access_key_id="anything",
+    aws_secret_access_key="anything",
+    region_name="eu-west-2",
+    config=Config(s3={"addressing_style": "path"}),
+)
+s3.list_objects_v2(Bucket="astronauts")
+```
 
-### Configuration
+```python
+import pyarrow.fs, pyarrow.parquet as pq
 
-The storage backend is configured using environment variables:
+fs = pyarrow.fs.S3FileSystem(endpoint_override="127.0.0.1:8080", scheme="http", anonymous=True)
+pq.read_table("astronauts/astronauts.parquet", filesystem=fs)
+```
 
-- **`STORAGE_BACKEND`** - Set to `gcs` (default) or `local` to choose the backend
-- **`STORAGE_CACHE_SIZE`** - LRU cache size for blob content (default: 128)
-- **`LOCAL_STORAGE_PATH`** - Base path for local filesystem storage (default: `/data`)
-- **`GCS_PROJECT`** - GCS project name (default: `PROJECT`)
-- **`STORAGE_EMULATOR_HOST`** - GCS emulator host for testing
+### In tests
 
-### LRU Caching
+`hadro.Server` runs hadro in a background thread on a free port:
 
-S1 implements LRU (Least Recently Used) caching for blob content reads. This significantly improves performance when the same objects are accessed multiple times. The cache size can be configured using the `STORAGE_CACHE_SIZE` environment variable.
+```python
+import hadro
+import pytest
 
-The caching layer operates transparently for both GCS and local filesystem backends, making S1 an effective caching layer for systems like Opteryx.
+@pytest.fixture(scope="session")
+def s3_endpoint():
+    with hadro.Server(data="tests/data") as server:
+        yield server.endpoint   # e.g. http://127.0.0.1:53817
+```
+
+`hadro.create_app(config)` returns the FastAPI app if you would rather use
+`fastapi.testclient.TestClient` or mount it yourself.
+
+### Serving GCS
+
+```bash
+hadro --backend gcs --gcs-project my-project
+```
+
+This uses Application Default Credentials, or `STORAGE_EMULATOR_HOST` for a GCS emulator.
+Objects up to a quarter of the cache size are kept in memory (256MB by default; see
+`--cache-mb` and `--cache-ttl`).
+
+### Docker / Cloud Run
+
+```bash
+docker build -t hadro .
+docker run -p 8080:8080 -v "$PWD/data:/data" hadro
+docker run -p 8080:8080 -e HADRO_BACKEND=gcs hadro
+```
+
+## Configuration
+
+Settings can be given as CLI flags, as `HADRO_*` environment variables, or as fields
+of `hadro.Config`.
+
+| Flag | Environment | Default | |
+| --- | --- | --- | --- |
+| `DATA` (positional) | `HADRO_DATA` | `data` | Directory to serve (local backend) |
+| `--backend` | `HADRO_BACKEND` | `local` | `local` or `gcs` |
+| `--gcs-project` | `HADRO_GCS_PROJECT` | | Project used to list buckets |
+| `--host` | `HADRO_HOST` | `127.0.0.1` | Interface to bind |
+| `--port` | `HADRO_PORT`, then `PORT` | `8080` | |
+| `--region` | `HADRO_REGION` | `eu-west-2` | Region reported by GetBucketLocation |
+| `--cache-mb` | `HADRO_CACHE_MB` | 256 (gcs), 0 (local) | In-memory object cache |
+| `--cache-ttl` | `HADRO_CACHE_TTL` | `300` | Seconds before cached objects are refetched (0 = never) |
+| `--access-key` | `HADRO_ACCESS_KEY` | | Require SigV4-signed requests... |
+| `--secret-key` | `HADRO_SECRET_KEY` | | ...with this key pair |
+
+With no keys set, hadro accepts any request, signed or not. With keys set, it checks
+SigV4 signatures in the `Authorization` header and in presigned URLs.
+
+## S3 API coverage
+
+| Operation | |
+| --- | --- |
+| ListBuckets | |
+| HeadBucket, GetBucketLocation | |
+| ListObjects, ListObjectsV2 | prefix, delimiter / CommonPrefixes, pagination, `encoding-type=url` |
+| GetObject, HeadObject | single `Range` requests, `ETag`, `Last-Modified`, `Content-Type` |
+| SelectObjectContent | Parquet input only; see below |
+| Anything that writes | Rejected with `405 MethodNotAllowed` |
+| Other sub-resources (`?acl`, `?versioning`...) | `501 NotImplemented` |
+
+Local-backend ETags are derived from each file's size and modification time rather than
+an MD5 of its contents, so they are stable and change whenever the file does.
+
+## S3 Select
+
+```python
+response = s3.select_object_content(
+    Bucket="astronauts",
+    Key="astronauts.parquet",
+    Expression="SELECT name, missions FROM S3Object s WHERE s.space_flights > 5 LIMIT 10",
+    ExpressionType="SQL",
+    InputSerialization={"Parquet": {}},
+    OutputSerialization={"JSON": {}},
+)
+for event in response["Payload"]:
+    if "Records" in event:
+        print(event["Records"]["Payload"].decode())
+```
+
+Supported SQL:
+
+```sql
+SELECT * | column [[AS] alias], ...
+FROM S3Object [[AS] alias]
+[WHERE condition]
+[LIMIT n]
+```
+
+- Comparisons `= != <> < <= > >=` and `IS [NOT] NULL`, `[NOT] IN (...)`,
+  `[NOT] BETWEEN ... AND ...`, `[NOT] LIKE`, combined with `AND`, `OR`, `NOT` and parentheses.
+- Literals are converted to the column's type, so `birth_date < '1960-01-01'` works on
+  date and timestamp columns.
+- Unquoted column names are case-insensitive; `"quoted"` names are exact.
+- Filters and column selection are pushed down into the Parquet reader.
+- Aggregates, functions, `GROUP BY` and `ORDER BY` are not supported.
+
+Output can be JSON Lines or CSV (with custom delimiters and quoting), or **Parquet**.
+Parquet output is a hadro extension: send `<OutputSerialization><Parquet/></OutputSerialization>`,
+optionally with `CompressionAlgorithm`, `CompressionLevel` and `WriteStatistics`.
+`SELECT *` with Parquet output returns the original file untouched.
+
+Results are streamed in 10,000-row `Records` events, followed by `Stats` and `End`.
+
+## Development
+
+```bash
+make install   # creates .venv with test and gcs extras
+make test
+make lint
+make run       # serves ./data on port 8080
+```
+
+## Migrating from S1 / cache.opteryx.app
+
+- The package is `hadro`; start it with `hadro` or `python -m hadro` rather than `python src/main.py`.
+- Environment variables now have a `HADRO_` prefix: `STORAGE_BACKEND` → `HADRO_BACKEND`,
+  `LOCAL_STORAGE_PATH` → `HADRO_DATA`, `GCS_PROJECT` → `HADRO_GCS_PROJECT`,
+  `S1_ACCESS_KEY`/`S1_SECRET_KEY` → `HADRO_ACCESS_KEY`/`HADRO_SECRET_KEY`.
+  `STORAGE_CACHE_SIZE` (a count of objects) is replaced by `HADRO_CACHE_MB`.
+- The default backend is now `local`, and the default host is `127.0.0.1`.
+- Errors are S3 XML documents (`NoSuchKey`, `NoSuchBucket`, ...) instead of plain text.
