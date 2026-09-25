@@ -1,1 +1,0 @@
-from hadro.lamport.simple_lamport_provider import SimpleLamportProvider

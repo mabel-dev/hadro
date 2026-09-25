@@ -1,6 +1,10 @@
 **.pyc
-temp/**
-scratch/**
-**.cpp
-**.o
-data/*.hadro
+__pycache__/
+*.py[cod]
+*$py.class
+
+.venv/**
+*egg-info/
+build/
+dist/
+.pytest_cache/

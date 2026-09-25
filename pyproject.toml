@@ -1,28 +1,55 @@
-[tool.black]
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hadro"
+dynamic = ["version"]
+description = "A small, read-only, S3-compatible server for local directories and Google Cloud Storage, with S3 Select over Parquet."
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+authors = [{ name = "Justin Joyce" }]
+keywords = ["s3", "emulator", "s3-select", "parquet", "gcs", "testing"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Framework :: FastAPI",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Topic :: Software Development :: Testing",
+    "Topic :: System :: Filesystems",
+]
+dependencies = [
+    "fastapi>=0.110,<1.0",
+    "uvicorn>=0.30,<1.0",
+    "pyarrow>=15.0",
+]
+
+[project.optional-dependencies]
+gcs = ["google-cloud-storage>=2.10,<4.0"]
+test = [
+    "pytest>=7.0,<10.0",
+    "httpx>=0.24,<1.0",
+    "boto3>=1.34",
+    "minio>=7.2,<8.0",
+]
+
+[project.scripts]
+hadro = "hadro.cli:main"
+
+[project.urls]
+Source = "https://github.com/mabel-dev/hadro"
+
+[tool.setuptools.dynamic]
+version = { attr = "hadro.__version__" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
 line-length = 100
-target-version = ['py310']
-fast = true
-
-[tool.isort]
-profile = "black"
-extend_skip_glob = ["tests/**", "*.pyx", "testdata/**"]
-skip_gitignore = true
-line_length = 100
-multi_line_output = 9
-force_single_line = true
-float_to_top = true
-ensure_newline_before_comments = true
-
-[tool.pylint.messages_control]
-disable = "C0103,C0415"
-
-[tool.mypy]
-exclude = ["bench", "#"]
-
-[tool.bandit]
-exclude_dirs = ["**/test_*.py",]
-skips = ["B101", "B105", "B324", "B608"]
-# B101 - Use of ASSERT
-# B105 - Hardcoded passwords
-# B324 - Use of weak crypto
-# B608 - Hardcoded SQL
+target-version = "py310"
