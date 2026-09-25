@@ -1,6 +1,6 @@
 """hadro - a small, read-only, S3-compatible server for local files and GCS."""
 
-__version__ = "0.6.0"
+__version__ = "0.7.0"
 
 from .config import Config
 from .server import Server
