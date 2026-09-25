@@ -16,7 +16,7 @@ def _all_keys(s3, **kwargs):
 
 def test_list_buckets(s3):
     names = [b["Name"] for b in s3.list_buckets()["Buckets"]]
-    assert names == ["astronauts", "empty", "nested", "planets", "tweets"]
+    assert names == ["astronauts", "empty", "events", "nested", "planets", "tweets"]
 
 
 def test_head_bucket(s3):

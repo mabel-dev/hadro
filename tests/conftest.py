@@ -1,3 +1,4 @@
+import gzip
 import shutil
 from pathlib import Path
 
@@ -31,6 +32,25 @@ def data_dir(tmp_path_factory) -> Path:
         path = nested / key
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(f"contents of {key}")
+    events = root / "events"
+    events.mkdir()
+    lines = (
+        '{"name": "alice", "team": "blue", "score": 88, "tags": ["a"]}\n'
+        '{"name": "bob", "team": "red", "score": 12, "tags": ["b", "c"]}\n'
+        '{"name": "carol", "team": "red", "score": 72, "tags": []}\n'
+        '{"name": "dave", "team": "green", "score": 40, "tags": null}\n'
+        '{"name": "erin", "team": "green", "score": 91, "tags": ["d"]}\n'
+    )
+    (events / "events.jsonl").write_text(lines)
+    (events / "events.jsonl.gz").write_bytes(gzip.compress(lines.encode()))
+    people = [("Ada", 36, "London"), ("Linus", 29, "Helsinki, FI"), ("Grace", 45, "Los Angeles")]
+    (events / "people.csv").write_text(
+        "name,age,city\n" + "".join(f'{n},{a},"{c}"\n' for n, a, c in people)
+    )
+    (events / "people_noheader.csv").write_text("".join(f'{n},{a},"{c}"\n' for n, a, c in people))
+    (events / "people.tsv").write_text(
+        "name\tage\tcity\n" + "".join(f"{n}\t{a}\t{c}\n" for n, a, c in people)
+    )
     (root / "empty").mkdir()
     (root / "secret.txt").write_text("outside any bucket")
     return root

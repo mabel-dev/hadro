@@ -7,8 +7,8 @@
 # hadro
 
 A small, **read-only**, S3-compatible server. Point it at a local directory, or at
-Google Cloud Storage, and use any S3 client (boto3, MinIO, pyarrow, Opteryx, the AWS CLI)
-to list, download and query the data, including **S3 Select** over Parquet.
+Google Cloud Storage, and use any S3 client (boto3, MinIO, Opteryx, the AWS CLI) to list,
+download and query the data, including **S3 Select** over Parquet, JSON Lines and CSV.
 
 It's useful for:
 
@@ -26,6 +26,10 @@ this repository's history.
 pip install hadro          # local directories
 pip install 'hadro[gcs]'   # plus Google Cloud Storage
 ```
+
+hadro needs Python 3.11+ on Linux (x86-64 or aarch64, glibc 2.34+) or macOS on Apple silicon,
+the platforms [rugo](https://pypi.org/project/rugo/) publishes wheels for. It does not use
+pyarrow, pandas or numpy.
 
 ## Run
 
@@ -56,13 +60,6 @@ s3 = boto3.client(
     config=Config(s3={"addressing_style": "path"}),
 )
 s3.list_objects_v2(Bucket="astronauts")
-```
-
-```python
-import pyarrow.fs, pyarrow.parquet as pq
-
-fs = pyarrow.fs.S3FileSystem(endpoint_override="127.0.0.1:8080", scheme="http", anonymous=True)
-pq.read_table("astronauts/astronauts.parquet", filesystem=fs)
 ```
 
 ### In tests
@@ -129,7 +126,7 @@ SigV4 signatures in the `Authorization` header and in presigned URLs.
 | HeadBucket, GetBucketLocation | |
 | ListObjects, ListObjectsV2 | prefix, delimiter / CommonPrefixes, pagination, `encoding-type=url` |
 | GetObject, HeadObject | single `Range` requests, `ETag`, `Last-Modified`, `Content-Type` |
-| SelectObjectContent | Parquet input only; see below |
+| SelectObjectContent | Parquet, JSON Lines and CSV input; see below |
 | Anything that writes | Rejected with `405 MethodNotAllowed` |
 | Other sub-resources (`?acl`, `?versioning`...) | `501 NotImplemented` |
 
@@ -166,13 +163,24 @@ FROM S3Object [[AS] alias]
 - Literals are converted to the column's type, so `birth_date < '1960-01-01'` works on
   date and timestamp columns.
 - Unquoted column names are case-insensitive; `"quoted"` names are exact.
-- Filters and column selection are pushed down into the Parquet reader.
 - Aggregates, functions, `GROUP BY` and `ORDER BY` are not supported.
+
+Objects are read with [rugo](https://pypi.org/project/rugo/), the reader Opteryx uses:
+
+| Input | |
+| --- | --- |
+| Parquet | Column selection, and simple `AND`ed conditions (`col < 5`, `col IN (...)`) are pushed into rugo, which skips row groups and filters rows as it reads |
+| JSON Lines | `<JSON><Type>LINES</Type></JSON>`; `CompressionType` `GZIP` or `BZIP2` allowed |
+| CSV | `FileHeaderInfo` `USE` (columns by name) or `NONE`/`IGNORE` (`_1`, `_2`, ...); single-character `FieldDelimiter`; `GZIP`/`BZIP2` allowed |
+
+Conditions rugo can't apply (`OR`, `LIKE`, `IS NULL`...) are evaluated over the rows it returns,
+with SQL's NULL semantics. Column types come from the Parquet footer, or are inferred by rugo for
+JSON Lines and CSV, so `WHERE age > 30` compares numbers.
 
 Output can be JSON Lines or CSV (with custom delimiters and quoting), or **Parquet**.
 Parquet output is a hadro extension: send `<OutputSerialization><Parquet/></OutputSerialization>`,
-optionally with `CompressionAlgorithm`, `CompressionLevel` and `WriteStatistics`.
-`SELECT *` with Parquet output returns the original file untouched.
+optionally with `<CompressionAlgorithm>` `ZSTD` (the default) or `NONE`.
+`SELECT *` with Parquet in and out returns the original file untouched.
 
 Results are streamed in 10,000-row `Records` events, followed by `Stats` and `End`.
 

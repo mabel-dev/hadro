@@ -6,7 +6,7 @@ import base64
 import mimetypes
 import os
 from collections.abc import Iterator
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from .base import BucketInfo, ObjectInfo, StorageBackend
 
@@ -28,7 +28,7 @@ def _info(blob) -> ObjectInfo:
     return ObjectInfo(
         key=blob.name,
         size=int(blob.size or 0),
-        last_modified=blob.updated or datetime.now(timezone.utc),
+        last_modified=blob.updated or datetime.now(UTC),
         etag=f'"{etag}"',
         content_type=blob.content_type
         or mimetypes.guess_type(blob.name)[0]
@@ -54,7 +54,7 @@ class GCSBackend(StorageBackend):
 
     def list_buckets(self) -> list[BucketInfo]:
         return [
-            BucketInfo(b.name, b.time_created or datetime.now(timezone.utc))
+            BucketInfo(b.name, b.time_created or datetime.now(UTC))
             for b in self.client.list_buckets()
         ]
 

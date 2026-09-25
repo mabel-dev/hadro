@@ -1,4 +1,4 @@
-"""Output serialisation for S3 Select results."""
+"""Input and output serialisation for S3 Select, using rugo."""
 
 from __future__ import annotations
 
@@ -10,8 +10,17 @@ from dataclasses import dataclass
 from datetime import date, datetime, time
 from decimal import Decimal
 
-import pyarrow as pa
-import pyarrow.parquet as pq
+from rugo import csv as rugo_csv
+from rugo import jsonl as rugo_jsonl
+from rugo import parquet as rugo_parquet
+
+
+@dataclass
+class InputFormat:
+    format: str = "parquet"  # parquet, json (lines) or csv
+    compression: str = "NONE"  # NONE, GZIP or BZIP2 (CSV and JSON only)
+    file_header_info: str = "NONE"  # CSV: USE, IGNORE or NONE
+    field_delimiter: str = ","
 
 
 @dataclass
@@ -22,9 +31,7 @@ class OutputFormat:
     quote_character: str = '"'
     quote_fields: str = "ASNEEDED"  # or ALWAYS
     # Parquet output is a hadro extension (it is not part of AWS S3 Select).
-    compression: str | None = "snappy"
-    compression_level: int | None = None
-    write_statistics: bool = False
+    compression: str = "zstd"  # rugo writes zstd or none
 
     @property
     def batchable(self) -> bool:
@@ -51,22 +58,37 @@ def _csv_value(value):
         return ""
     if isinstance(value, (list, dict)):
         return json.dumps(value, default=_json_default)
-    if isinstance(value, (bytes, bytearray, memoryview)) or not isinstance(
-        value, (str, int, float, bool)
-    ):
-        return _json_default(value)
-    return value
+    if isinstance(value, (str, int, float, bool)):
+        return value
+    return _json_default(value)
 
 
-def to_json(table: pa.Table, output: OutputFormat) -> bytes:
-    delimiter = output.record_delimiter
-    rows = table.to_pylist()
+def _rows(morsel):
+    names = [name.decode() for name in morsel.column_names]
+    columns = [morsel.column(name).to_pylist() for name in morsel.column_names]
+    return names, zip(*columns)
+
+
+def to_json(morsel, output: OutputFormat) -> bytes:
+    if output.record_delimiter == "\n":
+        return rugo_jsonl.write_jsonl(morsel)
+    names, rows = _rows(morsel)
     return "".join(
-        json.dumps(row, default=_json_default, ensure_ascii=False) + delimiter for row in rows
+        json.dumps(dict(zip(names, row)), default=_json_default, ensure_ascii=False)
+        + output.record_delimiter
+        for row in rows
     ).encode("utf-8")
 
 
-def to_csv(table: pa.Table, output: OutputFormat) -> bytes:
+def to_csv(morsel, output: OutputFormat) -> bytes:
+    if (
+        output.record_delimiter == "\n"
+        and output.quote_character == '"'
+        and output.quote_fields.upper() == "ASNEEDED"
+        and len(output.field_delimiter) == 1
+    ):
+        return rugo_csv.write_csv(morsel, delimiter=output.field_delimiter, header=False)
+    _, rows = _rows(morsel)
     buffer = io.StringIO()
     writer = csv.writer(
         buffer,
@@ -75,27 +97,18 @@ def to_csv(table: pa.Table, output: OutputFormat) -> bytes:
         quotechar=output.quote_character,
         quoting=csv.QUOTE_ALL if output.quote_fields.upper() == "ALWAYS" else csv.QUOTE_MINIMAL,
     )
-    columns = [column.to_pylist() for column in table.columns]
-    for row in zip(*columns):
+    for row in rows:
         writer.writerow([_csv_value(value) for value in row])
     return buffer.getvalue().encode("utf-8")
 
 
-def to_parquet(table: pa.Table, output: OutputFormat) -> bytes:
-    buffer = io.BytesIO()
-    pq.write_table(
-        table,
-        buffer,
-        compression=output.compression,
-        compression_level=output.compression_level,
-        write_statistics=output.write_statistics,
-    )
-    return buffer.getvalue()
+def to_parquet(morsel, output: OutputFormat) -> bytes:
+    return rugo_parquet.write_parquet(morsel, compression=output.compression)
 
 
-def serialise(table: pa.Table, output: OutputFormat) -> bytes:
+def serialise(morsel, output: OutputFormat) -> bytes:
     if output.format == "csv":
-        return to_csv(table, output)
+        return to_csv(morsel, output)
     if output.format == "parquet":
-        return to_parquet(table, output)
-    return to_json(table, output)
+        return to_parquet(morsel, output)
+    return to_json(morsel, output)

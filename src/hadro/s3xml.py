@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from xml.etree import ElementTree as ET
 
 S3_NS = "http://s3.amazonaws.com/doc/2006-03-01/"
@@ -23,7 +23,7 @@ def to_xml(root: ET.Element, namespace: bool = True) -> bytes:
 
 def iso8601(moment: datetime) -> str:
     """Timestamp format used inside S3 XML bodies, e.g. 2009-10-12T17:50:30.000Z."""
-    moment = moment.astimezone(timezone.utc)
+    moment = moment.astimezone(UTC)
     return moment.strftime("%Y-%m-%dT%H:%M:%S.") + f"{moment.microsecond // 1000:03d}Z"
 
 
