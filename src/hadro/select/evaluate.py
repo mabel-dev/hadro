@@ -4,7 +4,8 @@ Filtering happens in two places, both native:
 
 1. ``plan`` hands every top-level ANDed condition that the input's rugo reader
    can apply exactly to it as a predicate. For Parquet that prunes row groups
-   on footer statistics and filters rows while decoding.
+   on footer statistics and filters rows while decoding. If rugo rejects a
+   predicate's literal type, the object is read unfiltered and step 2 filters.
 2. ``compile_mask`` turns whatever is left into a Draken boolean vector built
    from the vector compare kernels and ``and``/``or``/``not``, which follow SQL
    three-valued logic, and the morsel is filtered with it.
@@ -52,24 +53,34 @@ _INVERSE = {"=": "!=", "!=": "=", "<": ">=", "<=": ">", ">": "<=", ">=": "<"}
 
 @dataclass(frozen=True)
 class Pushdown:
-    """What a rugo reader applies exactly (verified against rugo 0.4.40)."""
+    """What a rugo reader applies exactly (verified against rugo 0.4.41)."""
 
     kinds: frozenset
     membership: bool = False  # in / not in
     null_tests: bool = False  # is null / is not null
+    # Whether column types are known before reading. If not (CSV), literals are
+    # pushed as written; rugo rejects a literal of the wrong type with
+    # ValueError, and the caller then reads unfiltered and filters with Draken.
+    typed: bool = True
 
 
-# rugo's JSONL reader silently returns no rows for in / not in / is null, and its
-# CSV reader keeps NULL rows for != and returns empty morsels when a literal's
-# type differs from the column's inferred type, so CSV gets no pushdown.
 PUSHDOWN = {
     "parquet": Pushdown(
         kinds=frozenset({"int", "float", "str", "date", "datetime", "bool"}),
         membership=True,
         null_tests=True,
     ),
-    "json": Pushdown(kinds=frozenset({"int", "float", "str"})),
+    "json": Pushdown(
+        kinds=frozenset({"int", "float", "str", "bool"}), membership=True, null_tests=True
+    ),
+    "csv": Pushdown(kinds=frozenset({"int", "float", "str"}), typed=False),
 }
+
+
+def _literal_kind(value: object) -> str | None:
+    if isinstance(value, bool):
+        return "bool"
+    return {int: "int", float: "float", str: "str"}.get(type(value))
 
 
 def kind(type_name: object) -> str:
@@ -200,11 +211,16 @@ def plan(
     return pushed, remainder
 
 
-def _pushable_column(operand, names, kinds, capability) -> tuple[str, str] | None:
+def _pushable_column(operand, names, kinds, capability, literals) -> tuple[str, str] | None:
+    """(column, kind to coerce literals to), if rugo can apply this predicate."""
     if not isinstance(operand, Column):
         return None
     name = resolve_column(names, operand)
-    target = kinds.get(name)
+    if capability.typed:
+        target = kinds.get(name)
+    else:
+        literal_kinds = {_literal_kind(v) for v in literals}
+        target = literal_kinds.pop() if len(literal_kinds) == 1 else None
     return (name, target) if target in capability.kinds else None
 
 
@@ -217,8 +233,10 @@ def _predicates(part: Condition, names, kinds, capability: Pushdown) -> list[Pre
         op, left, right = part.op, part.left, part.right
         if isinstance(left, Literal) and isinstance(right, Column):
             op, left, right = _FLIPPED[op], right, left
-        column = _pushable_column(left, names, kinds, capability)
-        if column is None or not isinstance(right, Literal) or right.value is None:
+        if not isinstance(right, Literal) or right.value is None:
+            return None
+        column = _pushable_column(left, names, kinds, capability, [right.value])
+        if column is None:
             return None
         name, target = column
         op = _INVERSE[op] if negated else op
@@ -231,19 +249,23 @@ def _predicates(part: Condition, names, kinds, capability: Pushdown) -> list[Pre
         return [(name, "is not null" if part.negated != negated else "is null", None)]
 
     if isinstance(part, InList) and capability.membership:
-        column = _pushable_column(part.operand, names, kinds, capability)
-        if column is None or any(v.value is None for v in part.values):
+        if any(v.value is None for v in part.values):
+            return None
+        column = _pushable_column(
+            part.operand, names, kinds, capability, [v.value for v in part.values]
+        )
+        if column is None:
             return None
         name, target = column
         values = [coerce(v.value, target) for v in part.values]
         return [(name, "not in" if part.negated != negated else "in", values)]
 
     if isinstance(part, Between) and not part.negated:
-        column = _pushable_column(part.operand, names, kinds, capability)
         bounds = (part.low, part.high)
-        if column is None or not all(
-            isinstance(b, Literal) and b.value is not None for b in bounds
-        ):
+        if not all(isinstance(b, Literal) and b.value is not None for b in bounds):
+            return None
+        column = _pushable_column(part.operand, names, kinds, capability, [b.value for b in bounds])
+        if column is None:
             return None
         name, target = column
         return [

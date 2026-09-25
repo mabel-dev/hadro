@@ -72,6 +72,9 @@ EVENTS = [
 
 PEOPLE = [
     "SELECT name FROM S3Object WHERE age > 30",
+    "SELECT name FROM S3Object WHERE age > '30'",  # rugo rejects the str literal; Draken filters
+    "SELECT name FROM S3Object WHERE age >= 29.5 AND city >= 'L'",
+    "SELECT name FROM S3Object WHERE NOT age < 36",
     "SELECT name FROM S3Object WHERE age != 36",
     "SELECT name FROM S3Object WHERE city LIKE 'L%'",
     "SELECT name FROM S3Object WHERE city LIKE '%, %' OR age BETWEEN 40 AND 50",
@@ -121,6 +124,14 @@ def _check(content, sql, source):
     assert _hadro(content, sql, source, pushdown=True) == expected, "rugo pushdown"
 
 
+TWEETS = [
+    "SELECT username FROM S3Object WHERE username = 'wugeej'",
+    "SELECT username, followers FROM S3Object WHERE followers > 100000 AND user_verified = 'True'",
+    "SELECT _id FROM S3Object WHERE location LIKE 'Seattle%' OR followers BETWEEN 15590 AND 15600",
+    "SELECT _id FROM S3Object WHERE tweet LIKE '%\\%' LIMIT 20",
+]
+
+
 @pytest.mark.parametrize("sql", ASTRONAUTS)
 def test_parquet(data_dir, sql):
     _check((data_dir / "astronauts/astronauts.parquet").read_bytes(), sql, InputFormat())
@@ -135,6 +146,22 @@ def test_json_lines(data_dir, sql):
 def test_csv(data_dir, sql):
     source = InputFormat(format="csv", file_header_info="USE")
     _check((data_dir / "events/people.csv").read_bytes(), sql, source)
+
+
+@pytest.mark.parametrize("sql", TWEETS)
+def test_csv_tweets(data_dir, sql):
+    source = InputFormat(format="csv", file_header_info="USE")
+    _check((data_dir / "tweets/tweets.csv").read_bytes(), sql, source)
+
+
+@pytest.mark.parametrize("header", ["NONE", "IGNORE"])
+def test_csv_positional_columns(data_dir, header):
+    """Pushed predicates on _1, _2... must reach rugo's own column names."""
+    key = "people_noheader.csv" if header == "NONE" else "people.csv"
+    content = (data_dir / "events" / key).read_bytes()
+    source = InputFormat(format="csv", file_header_info=header)
+    rows = _hadro(content, "SELECT _1 FROM S3Object WHERE _2 > 30 AND _3 < 'M'", source, True)
+    assert rows == [{"_1": "Ada"}, {"_1": "Grace"}]
 
 
 def test_queries_select_something(data_dir):

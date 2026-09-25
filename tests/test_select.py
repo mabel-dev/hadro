@@ -144,9 +144,16 @@ def test_pushdown_plan():
     # OR, LIKE, NOT BETWEEN, list columns, NULL list members and column-to-column stay native.
     assert len(conjuncts(residual)) == 6
 
-    json_pushed, _ = plan(where, names, kinds, "json")
-    assert {op for _, op, _ in json_pushed} <= {"==", "!=", "<", "<=", ">", ">="}
-    assert plan(where, names, kinds, "csv") == ([], where)
+    json_kinds = {"a": "int", "b": "str", "d": "str", "t": "str", "l": "other"}
+    json_pushed, _ = plan(where, names, json_kinds, "json")
+    assert {op for _, op, _ in json_pushed} >= {"in", "not in", "is null", "is not null"}
+
+    # CSV types are unknown up front: comparisons are pushed with the literal as written.
+    csv_pushed, csv_residual = plan(where, names, {}, "csv")
+    assert ("a", ">", 1) in csv_pushed and ("b", "==", "x") in csv_pushed
+    assert ("d", "<", "2020-01-01") in csv_pushed
+    assert {op for _, op, _ in csv_pushed} <= {"==", "!=", "<", "<=", ">", ">="}
+    assert csv_residual is not None
 
 
 def test_mask_three_valued_logic():
@@ -330,12 +337,8 @@ def test_csv_input_other_delimiter(s3):
     assert rows == [{"city": "Helsinki, FI"}]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="rugo 0.4.40 treats backslash as an escape inside quoted CSV fields (RFC 4180 has "
-    "no escapes), so tweets.csv is misread. Remove this marker once rugo is fixed.",
-)
 def test_csv_backslash_in_quoted_field(s3):
+    """tweets.csv has quoted fields containing backslashes (RFC 4180 has no escapes)."""
     rows = _rows(
         s3,
         "SELECT username FROM S3Object WHERE username = 'wugeej' LIMIT 1",

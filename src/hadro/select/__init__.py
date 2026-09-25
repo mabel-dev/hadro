@@ -170,15 +170,13 @@ def _run(content: bytes, query: Query, source: InputFormat, pushdown: bool) -> M
     if pushdown:
         predicates, residual = plan(query.where, names, kinds, source.format)
 
-    morsel = _read(content, source, needed, predicates, names)
-    if predicates and source.format == "json" and morsel is not None:
-        # JSONL types are inferred from a sample; if rugo typed a filtered column
-        # differently from the metadata, its predicate may have been compared as
-        # the wrong type. Read again and filter everything natively instead.
-        actual = {name: kind(t) for name, t in _schema(morsel).items()}
-        if any(actual.get(column) != kinds.get(column) for column, _, _ in predicates):
-            predicates, residual = [], query.where
-            morsel = _read(content, source, needed, predicates, names)
+    try:
+        morsel = _read(content, source, needed, predicates, names)
+    except _PredicateRejected:
+        # rugo refused a literal of the wrong type for the column (types are
+        # inferred for CSV and JSONL); filter everything with Draken instead.
+        morsel = _read(content, source, needed, [], names)
+        residual = query.where
     if morsel is None:
         return None
 
@@ -192,16 +190,10 @@ def _run(content: bytes, query: Query, source: InputFormat, pushdown: bool) -> M
     return morsel
 
 
-def _schema(morsel: Morsel) -> dict[str, object]:
-    return {(k.decode() if isinstance(k, bytes) else k): v for k, v in morsel.schema.items()}
-
-
 def _describe(content: bytes, source: InputFormat) -> tuple[list[str], dict[str, str]]:
     """Return the object's column names and, for Parquet, their kinds."""
     if source.format == "csv":
-        # rugo's CSV metadata has no delimiter or header options, so read the first line here.
-        first_line = content.split(b"\n", 1)[0].decode("utf-8-sig", "replace").rstrip("\r")
-        header = next(csv.reader([first_line], delimiter=source.field_delimiter), [])
+        header = _csv_header(content, source)
         if source.file_header_info == "USE":
             return header, {}
         return [f"_{i + 1}" for i in range(len(header))], {}
@@ -215,6 +207,16 @@ def _describe(content: bytes, source: InputFormat) -> tuple[list[str], dict[str,
         raise _unreadable(source, exc) from None
 
 
+class _PredicateRejected(Exception):
+    pass
+
+
+def _csv_header(content: bytes, source: InputFormat) -> list[str]:
+    # rugo's CSV metadata has no delimiter or header options, so read the first line here.
+    first_line = content.split(b"\n", 1)[0].decode("utf-8-sig", "replace").rstrip("\r")
+    return next(csv.reader([first_line], delimiter=source.field_delimiter), [])
+
+
 def _read(content, source: InputFormat, needed, predicates, names) -> Morsel | None:
     try:
         if source.format == "parquet":
@@ -223,20 +225,28 @@ def _read(content, source: InputFormat, needed, predicates, names) -> Morsel | N
             ) as reader:
                 morsels = list(reader)
         elif source.format == "json":
-            if predicates and needed is None:
-                needed = names  # rugo returns only the filtered columns otherwise
             with rugo_jsonl.read_jsonl(
                 content, columns=needed, predicates=predicates or None
             ) as reader:
                 morsels = list(reader)
         else:
+            has_header = source.file_header_info != "NONE"
+            if predicates:
+                # rugo names headerless columns col_0, col_1...; S3 calls them _1, _2...
+                header = _csv_header(content, source)
+                rugo_names = header if has_header else [f"col_{i}" for i in range(len(header))]
+                by_s3_name = dict(zip(names, rugo_names))
+                predicates = [(by_s3_name[c], op, v) for c, op, v in predicates]
             with rugo_csv.read_csv(
                 content,
+                predicates=predicates or None,
                 delimiter=source.field_delimiter,
-                has_header=source.file_header_info != "NONE",
+                has_header=has_header,
             ) as reader:
                 morsels = list(reader)
     except (RuntimeError, ValueError, OSError) as exc:
+        if predicates and isinstance(exc, ValueError):
+            raise _PredicateRejected from exc
         raise _unreadable(source, exc) from None
 
     if not morsels:

@@ -175,9 +175,11 @@ Objects are read with [rugo](https://pypi.org/project/rugo/), the reader Opteryx
 
 Filtering is native throughout:
 
-- Every top-level `AND`ed condition the input's rugo reader applies exactly is pushed into it:
-  comparisons (including `NOT a > 1` and `BETWEEN`) for Parquet and JSON Lines, plus `IN`,
-  `NOT IN` and `IS [NOT] NULL` for Parquet.
+- Every top-level `AND`ed condition the input's rugo reader supports is pushed into it:
+  comparisons (including `NOT a > 1` and `BETWEEN`) for all three formats, plus `IN`, `NOT IN`
+  and `IS [NOT] NULL` for Parquet and JSON Lines. CSV column types aren't known until the file
+  is read, so literals are pushed as written; if rugo rejects one as the wrong type, the object
+  is read unfiltered and Draken does the filtering.
 - Everything else (`OR`, `NOT BETWEEN`, `LIKE`, column-to-column comparisons...) is evaluated
   as Draken boolean vectors, which follow SQL's NULL semantics. `LIKE 'prefix%'` and exact
   patterns use the compare kernels; other patterns are matched in Python on that column only.
