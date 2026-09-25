@@ -1,3 +1,9 @@
+<div align="center">
+
+![Hadro](https://raw.githubusercontent.com/mabel-dev/hadro/main/hadro.png)
+
+</div>
+
 # hadro
 
 A small, **read-only**, S3-compatible server. Point it at a local directory, or at
@@ -10,7 +16,9 @@ It's useful for:
 - **Local development:** serve a folder of Parquet/CSV/JSON files as buckets.
 - **An S3 front-end for GCS:** expose GCS buckets to S3-only tools, with an in-memory cache.
 
-hadro evolved from S1 and the `cache.opteryx.app` Cloud Run service.
+hadro evolved from [S1](https://github.com/mabel-dev/s1) and the `cache.opteryx.app` Cloud Run
+service. Releases up to 0.5.0a6 were an unrelated storage engine (hadrodb), which is still in
+this repository's history.
 
 ## Install
 

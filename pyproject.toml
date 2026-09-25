@@ -39,7 +39,7 @@ test = [
 hadro = "hadro.cli:main"
 
 [project.urls]
-Source = "https://github.com/mabel-dev/s1"
+Source = "https://github.com/mabel-dev/hadro"
 
 [tool.setuptools.dynamic]
 version = { attr = "hadro.__version__" }
