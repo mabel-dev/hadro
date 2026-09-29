@@ -32,7 +32,8 @@ class Server:
 
     @property
     def endpoint(self) -> str:
-        return f"http://{self.config.host}:{self.config.port}"
+        scheme = "https" if self.config.tls_enabled else "http"
+        return f"{scheme}://{self.config.host}:{self.config.port}"
 
     def start(self, timeout: float = 10.0) -> Server:
         import uvicorn
@@ -46,7 +47,14 @@ class Server:
 
         app = create_app(self.config, self.backend)
         self._server = uvicorn.Server(
-            uvicorn.Config(app, log_level="warning", access_log=False, lifespan="off")
+            uvicorn.Config(
+                app,
+                log_level="warning",
+                access_log=False,
+                lifespan="off",
+                ssl_certfile=self.config.tls_cert,
+                ssl_keyfile=self.config.tls_key,
+            )
         )
         self._thread = threading.Thread(
             target=self._server.run, kwargs={"sockets": [self._socket]}, daemon=True
