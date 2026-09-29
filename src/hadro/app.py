@@ -10,6 +10,7 @@ from . import __version__, auth
 from .api import buckets_router, objects_router
 from .config import Config
 from .errors import MethodNotAllowed, S3Error, drain, s3_error_handler
+from .shaping import Shaper, validate
 from .storage import StorageBackend, create_backend
 
 _WRITE_METHODS = ["PUT", "DELETE", "PATCH"]
@@ -18,6 +19,8 @@ _WRITE_METHODS = ["PUT", "DELETE", "PATCH"]
 def create_app(config: Config | None = None, backend: StorageBackend | None = None) -> FastAPI:
     """Build the application. ``backend`` overrides the one named in ``config``."""
     config = config or Config.from_env()
+    if bool(config.tls_cert) != bool(config.tls_key):
+        raise ValueError("tls_cert and tls_key must be given together")
     app = FastAPI(
         title="hadro", version=__version__, docs_url=None, redoc_url=None, openapi_url=None
     )
@@ -42,6 +45,11 @@ def create_app(config: Config | None = None, backend: StorageBackend | None = No
 
     app.include_router(buckets_router)
     app.include_router(objects_router)
+
+    # Added last so it is outermost: latency and throttling cover the whole request.
+    validate(config)
+    if config.shaping_enabled:
+        app.add_middleware(Shaper, config=config)
     return app
 
 

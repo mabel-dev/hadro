@@ -112,11 +112,90 @@ of `hadro.Config`.
 | `--region` | `HADRO_REGION` | `eu-west-2` | Region reported by GetBucketLocation |
 | `--cache-mb` | `HADRO_CACHE_MB` | 256 (gcs), 0 (local) | In-memory object cache |
 | `--cache-ttl` | `HADRO_CACHE_TTL` | `300` | Seconds before cached objects are refetched (0 = never) |
+| `--tls-cert` | `HADRO_TLS_CERT` | | Serve HTTPS with this PEM certificate... |
+| `--tls-key` | `HADRO_TLS_KEY` | | ...and this PEM private key (see [HTTPS](#https)) |
 | `--access-key` | `HADRO_ACCESS_KEY` | | Require SigV4-signed requests... |
 | `--secret-key` | `HADRO_SECRET_KEY` | | ...with this key pair |
 
 With no keys set, hadro accepts any request, signed or not. With keys set, it checks
 SigV4 signatures in the `Authorization` header and in presigned URLs.
+
+## HTTPS
+
+hadro serves plain HTTP unless given a certificate and key, which is enough to test
+clients that insist on `https://` endpoints. Give both, as PEM files:
+
+```bash
+hadro ./data --tls-cert cert.pem --tls-key key.pem     # https://127.0.0.1:8080
+```
+
+For local use, make a self-signed certificate. The `subjectAltName` matters: clients
+check the host they connect to against it, so list every name or address you will use.
+
+```bash
+openssl req -x509 -newkey rsa:2048 -nodes -sha256 -days 30 \
+    -keyout key.pem -out cert.pem -subj "/CN=localhost" \
+    -addext "subjectAltName=IP:127.0.0.1,DNS:localhost"
+```
+
+A self-signed certificate is its own authority, so clients must be told to trust it
+rather than to skip verification:
+
+| Client | How to trust `cert.pem` |
+| --- | --- |
+| Anything built on OpenSSL or libcurl (curl, Opteryx) | `SSL_CERT_FILE=cert.pem` |
+| Python `requests` | `REQUESTS_CA_BUNDLE=cert.pem` |
+| boto3 / AWS CLI | `AWS_CA_BUNDLE=cert.pem`, or `verify="cert.pem"` on the client |
+| MinIO client | pass `http_client=urllib3.PoolManager(cert_reqs="CERT_REQUIRED", ca_certs="cert.pem")` |
+
+In tests, `hadro.Server(data=..., tls_cert="cert.pem", tls_key="key.pem")` serves HTTPS and
+`server.endpoint` starts with `https://`.
+
+The certificate is used as given; hadro does not generate one, renew one, or reload it
+while running. Use a real certificate, or terminate TLS in front of hadro, for anything
+that is not local development.
+
+## Behaving like a remote store
+
+By default hadro answers instantly, which is nothing like GCS or S3. These options make
+it behave like a distant blob store, for benchmarking and for reproducing timeouts and
+retries. Each is off at `0`, and with all of them off there is no overhead.
+
+| Flag | Environment | `hadro.Config` | |
+| --- | --- | --- | --- |
+| `--latency-ms` | `HADRO_LATENCY_MS` | `latency_ms` | Delay before each request is served (the round trip) |
+| `--latency-jitter-ms` | `HADRO_LATENCY_JITTER_MS` | `latency_jitter_ms` | Extra random delay per request, between 0 and this |
+| `--bandwidth-mbps` | `HADRO_BANDWIDTH_MBPS` | `bandwidth_mbps` | Cap on each response's transfer rate, in megabits per second |
+| `--total-bandwidth-mbps` | `HADRO_TOTAL_BANDWIDTH_MBPS` | `total_bandwidth_mbps` | Cap on all responses together, shared by concurrent requests |
+| `--error-rate` | `HADRO_ERROR_RATE` | `error_rate` | Fraction of requests (0 to 1) answered `503 SlowDown` |
+| `--fault-seed` | `HADRO_FAULT_SEED` | `fault_seed` | Seed that makes jitter and faults repeatable |
+
+```bash
+# ~50ms round trip, 2.5 Mbps per response, 100 Mbps for everything, 2% of requests fail
+hadro ./data --latency-ms 50 --bandwidth-mbps 2.5 --total-bandwidth-mbps 100 --error-rate 0.02
+```
+
+```python
+with hadro.Server(data="tests/data", latency_ms=50, bandwidth_mbps=2.5) as server:
+    ...
+```
+
+How it behaves:
+
+- **Latency** is applied to every request (GET, HEAD, listings, S3 Select) before it is
+  served, including requests that then fail with an error.
+- **`--bandwidth-mbps`** limits one response, like a per-stream object-store limit, so N
+  concurrent responses move N times that in total. It is per response rather than per TCP
+  connection, because the server does not see connections. **`--total-bandwidth-mbps`**
+  is the client's whole link: concurrent responses share it. Both can be set; a chunk is
+  released when the slower of the two allows it. Bodies are paced in 64 KiB chunks.
+- **`--error-rate`** answers with `503 SlowDown` and an S3 XML error before any body
+  (HEAD gets the status only). Which requests fail is decided from `--fault-seed` and the
+  request's sequence number, so the same seed and request order fail the same way.
+- `/health` is never shaped.
+- Values below 0, or an error rate above 1, are rejected when the app is created.
+
+Shaping happens after the TLS handshake, so it cannot reproduce handshake failures.
 
 ## S3 API coverage
 

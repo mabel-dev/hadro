@@ -32,6 +32,18 @@ class Config:
     log_level: str = "info"
     region: str = "eu-west-2"
 
+    # Serve HTTPS when both are set (PEM files).
+    tls_cert: str | None = None
+    tls_key: str | None = None
+
+    # Network shaping (see hadro.shaping); 0 disables each.
+    latency_ms: float = 0.0
+    latency_jitter_ms: float = 0.0
+    bandwidth_mbps: float = 0.0
+    total_bandwidth_mbps: float = 0.0
+    error_rate: float = 0.0
+    fault_seed: int = 0
+
     # Signature checking is enabled only when both keys are set.
     access_key: str | None = None
     secret_key: str | None = None
@@ -51,6 +63,14 @@ class Config:
             region=_env("REGION", "eu-west-2"),
             access_key=_env("ACCESS_KEY"),
             secret_key=_env("SECRET_KEY"),
+            tls_cert=_env("TLS_CERT"),
+            tls_key=_env("TLS_KEY"),
+            latency_ms=float(_env("LATENCY_MS", "0")),
+            latency_jitter_ms=float(_env("LATENCY_JITTER_MS", "0")),
+            bandwidth_mbps=float(_env("BANDWIDTH_MBPS", "0")),
+            total_bandwidth_mbps=float(_env("TOTAL_BANDWIDTH_MBPS", "0")),
+            error_rate=float(_env("ERROR_RATE", "0")),
+            fault_seed=int(_env("FAULT_SEED", "0")),
         )
         for key, value in overrides.items():
             if value is not None:
@@ -60,6 +80,20 @@ class Config:
     @property
     def auth_enabled(self) -> bool:
         return bool(self.access_key and self.secret_key)
+
+    @property
+    def tls_enabled(self) -> bool:
+        return bool(self.tls_cert and self.tls_key)
+
+    @property
+    def shaping_enabled(self) -> bool:
+        return bool(
+            self.latency_ms
+            or self.latency_jitter_ms
+            or self.bandwidth_mbps
+            or self.total_bandwidth_mbps
+            or self.error_rate
+        )
 
     @property
     def cache_bytes(self) -> int:
