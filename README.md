@@ -2,6 +2,10 @@
 
 ![Hadro](https://raw.githubusercontent.com/mabel-dev/hadro/main/hadro.png)
 
+<br />
+
+[![PyPI version](https://img.shields.io/pypi/v/hadro.svg)](https://pypi.org/project/hadro/) [![PyPI downloads](https://img.shields.io/pypi/dm/hadro.svg)](https://pypistats.org/packages/hadro) [![License](https://img.shields.io/github/license/mabel-dev/hadro.svg)](LICENSE)
+
 </div>
 
 # hadro
