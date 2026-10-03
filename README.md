@@ -173,6 +173,7 @@ retries. Each is off at `0`, and with all of them off there is no overhead.
 | `--total-bandwidth-mbps` | `HADRO_TOTAL_BANDWIDTH_MBPS` | `total_bandwidth_mbps` | Cap on all responses together, shared by concurrent requests |
 | `--error-rate` | `HADRO_ERROR_RATE` | `error_rate` | Fraction of requests (0 to 1) answered `503 SlowDown` |
 | `--fault-seed` | `HADRO_FAULT_SEED` | `fault_seed` | Seed that makes jitter and faults repeatable |
+| `--stats` | `HADRO_STATS` | `stats` | Track peak concurrent responses and bytes in flight; `GET /_shaping/stats` returns them (`?reset=1` zeroes them) |
 
 ```bash
 # ~50ms round trip, 2.5 Mbps per response, 100 Mbps for everything, 2% of requests fail

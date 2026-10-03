@@ -8,6 +8,8 @@ Off by default. Every setting is zero-means-off:
   object-store limit. N concurrent responses move N times this in total.
 * ``total_bandwidth_mbps``: cap on every response together, like a saturated
   client link. Concurrent responses share it.
+* ``stats``: not shaping but measuring - peak concurrent responses and peak bytes in
+  flight, read (and optionally reset) at ``GET /_shaping/stats[?reset=1]``.
 * ``error_rate``: chance a request is answered ``503 SlowDown`` before any body.
   Deterministic per (``fault_seed``, request number) so runs are reproducible.
 
@@ -17,6 +19,7 @@ Implemented as a pure ASGI middleware. ``/health`` is never shaped.
 from __future__ import annotations
 
 import asyncio
+import json
 import random
 import uuid
 
@@ -46,10 +49,76 @@ class Shaper:
         self.error_rate = config.error_rate
         self.seed = config.fault_seed
         self._requests = 0
+        self.stats = config.stats
+        self._reset_stats()
         # When the shared link is next free; only ever touched from the event loop.
         self._link_free_at = 0.0
 
+    def _reset_stats(self):
+        self._active = 0
+        self._active_bytes = 0
+        self._peak_active = 0
+        self._peak_active_bytes = 0
+        self._total_bytes = 0
+        self._total_responses = 0
+
+    async def _send_stats(self, scope, send):
+        if b"reset=1" in scope.get("query_string", b""):
+            body = self._snapshot()
+            self._reset_stats()
+        else:
+            body = self._snapshot()
+        payload = json.dumps(body).encode()
+        await send({"type": "http.response.start", "status": 200, "headers": [
+            (b"content-type", b"application/json"), (b"content-length", str(len(payload)).encode())]})
+        await send({"type": "http.response.body", "body": payload})
+
+    def _snapshot(self):
+        return {
+            "peak_concurrent_responses": self._peak_active,
+            "peak_bytes_in_flight": self._peak_active_bytes,
+            "responses": self._total_responses,
+            "bytes_sent": self._total_bytes,
+        }
+
+    def _tracked(self, send):
+        """Wrap ``send`` to count a response as in flight from its first byte until its last."""
+        state = {"open": False, "remaining": 0}
+
+        async def tracked_send(message):
+            if message["type"] == "http.response.start":
+                length = 0
+                for name, value in message.get("headers", []):
+                    if name.lower() == b"content-length":
+                        length = int(value)
+                state["open"], state["remaining"] = True, length
+                self._active += 1
+                self._active_bytes += length
+                self._peak_active = max(self._peak_active, self._active)
+                self._peak_active_bytes = max(self._peak_active_bytes, self._active_bytes)
+            elif message["type"] == "http.response.body":
+                sent = len(message.get("body", b""))
+                self._total_bytes += sent
+                state["remaining"] -= sent
+                self._active_bytes -= sent
+                if not message.get("more_body", False):
+                    self._finish(state)
+            await send(message)
+
+        return tracked_send, state
+
+    def _finish(self, state):
+        if state["open"]:
+            state["open"] = False
+            self._active -= 1
+            self._active_bytes -= state["remaining"]
+            state["remaining"] = 0
+            self._total_responses += 1
+
     async def __call__(self, scope, receive, send):
+        if scope["type"] == "http" and scope["path"] == "/_shaping/stats":
+            await self._send_stats(scope, send)
+            return
         if scope["type"] != "http" or scope["path"] == "/health":
             await self.app(scope, receive, send)
             return
@@ -65,6 +134,17 @@ class Shaper:
             await self._slow_down(scope, send)
             return
 
+        state = None
+        if self.stats:
+            send, state = self._tracked(send)
+
+        try:
+            await self._serve(scope, receive, send)
+        finally:
+            if state is not None:
+                self._finish(state)  # a dropped connection must not leave bytes "in flight"
+
+    async def _serve(self, scope, receive, send):
         if not (self.stream_bps or self.total_bps):
             await self.app(scope, receive, send)
             return

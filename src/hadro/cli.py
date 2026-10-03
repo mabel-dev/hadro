@@ -45,6 +45,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--error-rate", type=float, help="fraction of requests answered 503")
     parser.add_argument("--fault-seed", type=int, help="seed for reproducible latency/faults")
+    parser.add_argument(
+        "--stats",
+        action="store_true",
+        default=None,
+        help="track peak concurrent responses and bytes in flight (GET /_shaping/stats)",
+    )
     parser.add_argument("--log-level", choices=["critical", "error", "warning", "info", "debug"])
     parser.add_argument("--version", action="version", version=f"hadro {__version__}")
     return parser
@@ -72,6 +78,7 @@ def main(argv: list[str] | None = None) -> int:
         total_bandwidth_mbps=args.total_bandwidth_mbps,
         error_rate=args.error_rate,
         fault_seed=args.fault_seed,
+        stats=args.stats,
     )
     if bool(config.tls_cert) != bool(config.tls_key):
         print("hadro: --tls-cert and --tls-key must be given together", file=sys.stderr)

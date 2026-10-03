@@ -43,6 +43,8 @@ class Config:
     total_bandwidth_mbps: float = 0.0
     error_rate: float = 0.0
     fault_seed: int = 0
+    # Track peak concurrent responses and bytes in flight; read at /_shaping/stats.
+    stats: bool = False
 
     # Signature checking is enabled only when both keys are set.
     access_key: str | None = None
@@ -71,6 +73,7 @@ class Config:
             total_bandwidth_mbps=float(_env("TOTAL_BANDWIDTH_MBPS", "0")),
             error_rate=float(_env("ERROR_RATE", "0")),
             fault_seed=int(_env("FAULT_SEED", "0")),
+            stats=_env("STATS", "0").lower() in ("1", "true", "yes"),
         )
         for key, value in overrides.items():
             if value is not None:
@@ -93,6 +96,7 @@ class Config:
             or self.bandwidth_mbps
             or self.total_bandwidth_mbps
             or self.error_rate
+            or self.stats
         )
 
     @property

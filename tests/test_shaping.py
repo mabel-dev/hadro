@@ -117,3 +117,25 @@ def test_env_and_cli(monkeypatch):
     assert config.error_rate == 0.1 and config.shaping_enabled
     args = build_parser().parse_args(["--latency-ms", "5", "--bandwidth-mbps", "3", "--fault-seed", "9"])
     assert (args.latency_ms, args.bandwidth_mbps, args.fault_seed) == (5, 3, 9)
+
+
+def test_stats_report_peak_concurrency_and_bytes_in_flight(data):
+    # Slow responses (250 KB/s each) so two overlap; each carries 128 KiB.
+    c = client(data, stats=True, bandwidth_mbps=2)
+    assert c.get("/_shaping/stats?reset=1").status_code == 200
+    threads = [threading.Thread(target=lambda: c.get("/b/blob.bin")) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    stats = c.get("/_shaping/stats").json()
+    assert stats["peak_concurrent_responses"] == 2
+    assert stats["peak_bytes_in_flight"] == 2 * SIZE
+    assert stats["responses"] == 2 and stats["bytes_sent"] == 2 * SIZE
+    assert c.get("/_shaping/stats?reset=1").json()["responses"] == 2
+    assert c.get("/_shaping/stats").json() == {
+        "peak_concurrent_responses": 0, "peak_bytes_in_flight": 0, "responses": 0, "bytes_sent": 0}
+
+
+def test_stats_are_off_by_default(data):
+    assert client(data).get("/_shaping/stats").status_code == 404
